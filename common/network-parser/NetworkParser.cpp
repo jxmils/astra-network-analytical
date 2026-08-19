@@ -94,6 +94,22 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::FullyConnected;
     }
 
+    if (topology_name == "Mesh2DSnake") {
+        return TopologyBuildingBlock::Mesh2DSnake;
+    }
+
+    if (topology_name == "Torus2DSnake") {
+        return TopologyBuildingBlock::Torus2DSnake;
+    }
+
+    if (topology_name == "Mesh2D") {
+        return TopologyBuildingBlock::Mesh2D;
+    }
+
+    if (topology_name == "Torus2D") {
+        return TopologyBuildingBlock::Torus2D;
+    }
+
     if (topology_name == "Switch") {
         return TopologyBuildingBlock::Switch;
     }
