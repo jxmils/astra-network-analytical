@@ -60,9 +60,15 @@ class Mesh2D final : public BasicTopology {
     [[nodiscard]] int y_of(DeviceId id) const noexcept;
     [[nodiscard]] DeviceId id_of(int x, int y) const noexcept;
 
-    /// advance one coordinate step from cur towards target along an axis of
-    /// extent n, taking the shorter direction when wraparound is enabled
-    [[nodiscard]] int step_towards(int cur, int target, int n) const noexcept;
+    /// Advance one coordinate step from cur towards target along an axis of
+    /// extent n, taking the shorter direction when wraparound is enabled.
+    ///
+    /// On a wrapped axis of even extent the antipodal distance n/2 is an exact
+    /// tie. Always resolving it the same way piles every antipodal flow onto
+    /// one direction: for a full all-to-all on a 16-ring that loads clockwise
+    /// links to 36 traversals against 28 counterclockwise, a 12.5% overload of
+    /// the bottleneck. `tie_backward` splits those flows between directions.
+    [[nodiscard]] int step_towards(int cur, int target, int n, bool tie_backward) const noexcept;
 
     /// logical NPU id -> physical grid device id
     std::vector<DeviceId> placement;

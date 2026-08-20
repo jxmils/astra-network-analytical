@@ -61,7 +61,8 @@ DeviceId Mesh2D::id_of(const int x, const int y) const noexcept {
     return static_cast<DeviceId>(y * width + x);
 }
 
-int Mesh2D::step_towards(const int cur, const int target, const int n) const noexcept {
+int Mesh2D::step_towards(const int cur, const int target, const int n,
+                         const bool tie_backward) const noexcept {
     if (!wraparound) {
         return (target > cur) ? (cur + 1) : (cur - 1);
     }
@@ -69,10 +70,16 @@ int Mesh2D::step_towards(const int cur, const int target, const int n) const noe
     // shorter direction around the ring
     const auto forward = ((target - cur) + n) % n;
     const auto backward = n - forward;
-    if (forward <= backward) {
+    if (forward < backward) {
         return (cur + 1) % n;
     }
-    return (cur - 1 + n) % n;
+    if (backward < forward) {
+        return (cur - 1 + n) % n;
+    }
+
+    // exact tie: antipodal. Resolving every tie the same way overloads that
+    // direction by 12.5% under all-to-all; split them instead.
+    return tie_backward ? ((cur - 1 + n) % n) : ((cur + 1) % n);
 }
 
 Route Mesh2D::route(const DeviceId src, const DeviceId dest) const noexcept {
@@ -92,13 +99,17 @@ Route Mesh2D::route(const DeviceId src, const DeviceId dest) const noexcept {
 
     route.push_back(devices[id_of(cx, cy)]);
 
+    // Split antipodal ties by source parity so both directions carry half.
+    // Deterministic, so routes stay stable across runs.
+    const auto tie_backward = ((static_cast<int>(phys_src) & 1) != 0);
+
     // dimension-order routing: X first, then Y
     while (cx != dx) {
-        cx = step_towards(cx, dx, width);
+        cx = step_towards(cx, dx, width, tie_backward);
         route.push_back(devices[id_of(cx, cy)]);
     }
     while (cy != dy) {
-        cy = step_towards(cy, dy, height);
+        cy = step_towards(cy, dy, height, tie_backward);
         route.push_back(devices[id_of(cx, cy)]);
     }
 
