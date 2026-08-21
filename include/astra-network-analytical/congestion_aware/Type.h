@@ -22,13 +22,31 @@ class Device;
 using LinkId = int;
 constexpr LinkId AutomaticLink = -1;
 
-enum class LinkClass { Generic, BaseMesh, RowRing, SwitchUplink };
+enum class LinkClass {
+    Generic,
+    BaseMesh,
+    RowRing,
+    SwitchUplink,
+    ScaleUp,
+    Gateway,
+    ScaleOut
+};
 
-enum class RouteClass { Direct, Switch };
+enum class RouteClass { Direct, Switch, Local, Boundary };
 
 [[nodiscard]] constexpr std::string_view route_class_name(
     const RouteClass route_class) noexcept {
-    return route_class == RouteClass::Switch ? "switch" : "direct";
+    switch (route_class) {
+    case RouteClass::Direct:
+        return "direct";
+    case RouteClass::Switch:
+        return "switch";
+    case RouteClass::Local:
+        return "local";
+    case RouteClass::Boundary:
+        return "boundary";
+    }
+    return "unknown";
 }
 
 [[nodiscard]] constexpr std::string_view link_class_name(const LinkClass link_class) noexcept {
@@ -41,6 +59,12 @@ enum class RouteClass { Direct, Switch };
         return "row_ring";
     case LinkClass::SwitchUplink:
         return "switch_uplink";
+    case LinkClass::ScaleUp:
+        return "scale_up";
+    case LinkClass::Gateway:
+        return "gateway";
+    case LinkClass::ScaleOut:
+        return "scale_out";
     }
     return "unknown";
 }

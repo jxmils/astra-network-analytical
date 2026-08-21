@@ -191,6 +191,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::MultiSwitch6Adaptive;
     }
 
+    if (topology_name == "HierarchicalCluster") {
+        return TopologyBuildingBlock::HierarchicalCluster;
+    }
+
     if (topology_name == "Switch") {
         return TopologyBuildingBlock::Switch;
     }

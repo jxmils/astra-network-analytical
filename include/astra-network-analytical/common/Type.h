@@ -51,7 +51,8 @@ enum class TopologyBuildingBlock {
     TorusSwitchDirectOnly,
     TorusSwitchSwitchOnly,
     TorusSwitchAdaptive,
-    MultiSwitch6Adaptive
+    MultiSwitch6Adaptive,
+    HierarchicalCluster
 };
 
 }  // namespace NetworkAnalytical

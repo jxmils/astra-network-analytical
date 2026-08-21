@@ -6,6 +6,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/FullyConnected.h"
 #include "congestion_aware/Hybrid2D.h"
+#include "congestion_aware/HierarchicalCluster.h"
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
@@ -109,6 +110,9 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             direct_preference_factor, "", true);
     case TopologyBuildingBlock::MultiSwitch6Adaptive:
         return std::make_shared<MultiPlaneSwitch>(npus_count, bandwidth, latency);
+    case TopologyBuildingBlock::HierarchicalCluster:
+        return std::make_shared<HierarchicalCluster>(
+            npus_count, bandwidth, latency, extra_bandwidth, extra_latency);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:

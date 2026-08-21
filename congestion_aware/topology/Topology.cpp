@@ -119,8 +119,14 @@ void Topology::record_route(const Route& route, const ChunkSize chunk_size) noex
     while (next != route.end()) {
         const auto link_id = current->device->resolve_link(
             current->outgoing_link, next->device->get_id());
-        if (current->device->get_link_class(link_id) == LinkClass::SwitchUplink) {
+        const auto link_class = current->device->get_link_class(link_id);
+        if (link_class == LinkClass::SwitchUplink) {
             route_class = RouteClass::Switch;
+        } else if (link_class == LinkClass::ScaleOut) {
+            route_class = RouteClass::Boundary;
+        } else if (link_class == LinkClass::ScaleUp &&
+                   route_class == RouteClass::Direct) {
+            route_class = RouteClass::Local;
         }
         propagation_time += static_cast<EventTime>(
             current->device->get_link_latency(link_id));

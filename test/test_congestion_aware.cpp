@@ -9,6 +9,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Chunk.h"
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/Hybrid2D.h"
+#include "congestion_aware/HierarchicalCluster.h"
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
@@ -533,6 +534,80 @@ TEST_F(TestNetworkAnalyticalCongestionAware, SixPortBaselinesUseExactEndpointPor
             chunk_size, path, callback, nullptr));
     }
     EXPECT_EQ(selected_planes.size(), MultiPlaneSwitch::Planes);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       HierarchicalClusterHasExactResourcesAndLogicalDimensions) {
+    constexpr auto npus = 64;
+    const auto topology = HierarchicalCluster(
+        npus, 200.0, 1'000.0, 25.0, 1'000.0);
+    const auto metrics = topology.get_link_metrics();
+
+    EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({8, 8}));
+    EXPECT_EQ(topology.get_bandwidth_per_dim(),
+              std::vector<Bandwidth>({200.0, 25.0}));
+    EXPECT_EQ(topology.get_nodes_count(), 8);
+    EXPECT_DOUBLE_EQ(topology.get_scale_out_bandwidth_per_node(), 200.0);
+    EXPECT_EQ(count_links(metrics, LinkClass::ScaleUp), 2 * npus);
+    EXPECT_EQ(count_links(metrics, LinkClass::Gateway), 2 * 8);
+    EXPECT_EQ(count_links(metrics, LinkClass::ScaleOut), 2 * 8);
+    EXPECT_EQ(metrics.size(), 160);
+
+    for (auto npu = 0; npu < npus; ++npu) {
+        EXPECT_EQ(topology.route(npu, npu).front()
+                      ->get_connected_device_ids().size(),
+                  1);
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       HierarchicalClusterSeparatesLocalAndBoundaryRoutes) {
+    const auto topology = HierarchicalCluster(
+        64, 200.0, 1'000.0, 25.0, 1'000.0);
+    const auto local = topology.route(0, 7);
+    const auto boundary = topology.route(0, 8);
+
+    EXPECT_EQ(route_ids(local), std::vector<DeviceId>({0, 64, 7}));
+    EXPECT_EQ(route_link_classes(local),
+              std::vector<LinkClass>(2, LinkClass::ScaleUp));
+    EXPECT_EQ(route_ids(boundary),
+              std::vector<DeviceId>({0, 64, 72, 80, 73, 65, 8}));
+    EXPECT_EQ(route_link_classes(boundary),
+              std::vector<LinkClass>({
+                  LinkClass::ScaleUp, LinkClass::Gateway,
+                  LinkClass::ScaleOut, LinkClass::ScaleOut,
+                  LinkClass::Gateway, LinkClass::ScaleUp}));
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       HierarchicalClusterTelemetryDistinguishesBoundaryTraffic) {
+    auto topology = HierarchicalCluster(
+        64, 200.0, 1'000.0, 25.0, 1'000.0);
+    const auto local = topology.route(0, 7);
+    const auto boundary = topology.route(0, 8);
+    topology.send(std::make_unique<Chunk>(chunk_size, local, callback, nullptr));
+    topology.send(std::make_unique<Chunk>(chunk_size, boundary, callback, nullptr));
+
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    const auto routes = topology.get_route_metrics();
+    ASSERT_EQ(routes.size(), 2);
+    const auto local_metric = std::find_if(
+        routes.begin(), routes.end(), [](const RouteMetrics& metric) {
+            return metric.route_class == RouteClass::Local;
+        });
+    const auto boundary_metric = std::find_if(
+        routes.begin(), routes.end(), [](const RouteMetrics& metric) {
+            return metric.route_class == RouteClass::Boundary;
+        });
+    ASSERT_NE(local_metric, routes.end());
+    ASSERT_NE(boundary_metric, routes.end());
+    EXPECT_EQ(local_metric->hops, 2);
+    EXPECT_EQ(local_metric->payload_bytes, chunk_size);
+    EXPECT_EQ(boundary_metric->hops, 6);
+    EXPECT_EQ(boundary_metric->payload_bytes, chunk_size);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, TorusHybridAblationsKeepIdenticalHardware) {
