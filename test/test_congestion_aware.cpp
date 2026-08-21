@@ -77,6 +77,16 @@ int count_links(const std::vector<LinkMetrics>& metrics, const LinkClass link_cl
         }));
 }
 
+struct ArrivalObservation {
+    std::shared_ptr<EventQueue> event_queue;
+    EventTime arrival_time = -1;
+};
+
+void record_arrival(void* const arg) {
+    auto* const observation = static_cast<ArrivalObservation*>(arg);
+    observation->arrival_time = observation->event_queue->get_current_time();
+}
+
 }  // namespace
 
 TEST_F(TestNetworkAnalyticalCongestionAware, HybridTopologiesHaveExactPhysicalPorts) {
@@ -220,6 +230,40 @@ TEST_F(TestNetworkAnalyticalCongestionAware, AdaptiveRoutingAccountsForAssignedT
             EXPECT_EQ(metric.peak_outstanding_bytes == 0, metric.bytes == 0);
         }
     }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, ExtraLinkLatencyChangesPhysicalArrivalDelay) {
+    const auto measure = [this](const Hybrid2D::ExtraFabric fabric,
+                                const Latency extra_latency,
+                                const DeviceId destination) {
+        event_queue = std::make_shared<EventQueue>();
+        Topology::set_event_queue(event_queue);
+        auto topology = Hybrid2D(16, 200.0, 1'000.0, fabric,
+                                 Hybrid2D::RoutingPolicy::Static,
+                                 200.0, extra_latency);
+        const auto path = topology.route(0, destination, chunk_size);
+        ArrivalObservation observation{event_queue};
+        auto chunk = std::make_unique<Chunk>(
+            chunk_size, path, record_arrival, &observation);
+        topology.send(std::move(chunk));
+        while (!event_queue->finished()) {
+            event_queue->proceed();
+        }
+        EXPECT_GE(observation.arrival_time, 0);
+        return observation.arrival_time;
+    };
+
+    const auto row_zero = measure(Hybrid2D::ExtraFabric::RowRing, 0.0, 3);
+    const auto row_one = measure(Hybrid2D::ExtraFabric::RowRing, 1'000.0, 3);
+    const auto row_two = measure(Hybrid2D::ExtraFabric::RowRing, 2'000.0, 3);
+    EXPECT_EQ(row_one - row_zero, 1'000);
+    EXPECT_EQ(row_two - row_one, 1'000);
+
+    const auto switch_zero = measure(Hybrid2D::ExtraFabric::Switch, 0.0, 15);
+    const auto switch_one = measure(Hybrid2D::ExtraFabric::Switch, 1'000.0, 15);
+    const auto switch_two = measure(Hybrid2D::ExtraFabric::Switch, 2'000.0, 15);
+    EXPECT_EQ(switch_one - switch_zero, 2'000);
+    EXPECT_EQ(switch_two - switch_one, 2'000);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, MeshAndTorusGraphStructure) {
