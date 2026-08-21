@@ -9,6 +9,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Type.h"
 #include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 using namespace NetworkAnalytical;
@@ -42,6 +43,22 @@ class Device {
      */
     [[nodiscard]] std::vector<DeviceId> get_connected_device_ids() const noexcept;
 
+    /** Return metadata for every outgoing physical port. */
+    [[nodiscard]] std::vector<LinkMetrics> get_link_metrics() const noexcept;
+
+    /** Return the class of one outgoing physical port. */
+    [[nodiscard]] LinkClass get_link_class(LinkId link_id) const noexcept;
+
+    /** Return whether a port connects to the requested next device. */
+    [[nodiscard]] bool link_connects(LinkId link_id, DeviceId destination) const noexcept;
+
+    /** Estimated outstanding bytes already assigned to a port. */
+    [[nodiscard]] uint64_t get_outstanding_bytes(LinkId link_id) const noexcept;
+
+    /** Port bandwidth and latency used by path-cost calculations. */
+    [[nodiscard]] Bandwidth get_link_bandwidth(LinkId link_id) const noexcept;
+    [[nodiscard]] Latency get_link_latency(LinkId link_id) const noexcept;
+
     /**
      * Initiate a chunk transmission.
      * You must invoke this method on the source device of the chunk.
@@ -57,23 +74,29 @@ class Device {
      * @param bandwidth bandwidth of the link
      * @param latency latency of the link
      */
-    void connect(DeviceId id, Bandwidth bandwidth, Latency latency) noexcept;
+    LinkId connect(DeviceId id, Bandwidth bandwidth, Latency latency,
+                   LinkClass link_class = LinkClass::Generic) noexcept;
+
+    /** Reserve all bytes assigned to a port before transmission begins. */
+    void reserve(LinkId link_id, DeviceId destination, ChunkSize chunk_size) noexcept;
 
   private:
     /// device Id
     DeviceId device_id;
 
-    /// links to other nodes
-    /// map[dest node node_id] -> link
-    std::map<DeviceId, std::shared_ptr<Link>> links;
+    struct Connection {
+        DeviceId destination;
+        std::shared_ptr<Link> link;
+    };
 
-    /**
-     * Check if this device is connected to another device.
-     *
-     * @param dest id of the device to check te connectivity
-     * @return true if connected to the given device, false otherwise
-     */
-    [[nodiscard]] bool connected(DeviceId dest) const noexcept;
+    /// Local physical ports. Multiple entries may have the same destination.
+    std::map<LinkId, Connection> links;
+
+    /// Next local physical-port ID.
+    LinkId next_link_id;
+
+    /** Resolve an old-style route hop when exactly one port reaches dest. */
+    [[nodiscard]] LinkId unique_link_to(DeviceId dest) const noexcept;
 };
 
 }  // namespace NetworkAnalyticalCongestionAware

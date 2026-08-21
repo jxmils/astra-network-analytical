@@ -7,6 +7,7 @@ LICENSE file in the root directory of this source tree.
 #include "common/NetworkFunction.h"
 #include "congestion_aware/Chunk.h"
 #include "congestion_aware/Device.h"
+#include <algorithm>
 #include <cassert>
 
 using namespace NetworkAnalytical;
@@ -20,6 +21,11 @@ void Link::link_become_free(void* const link_ptr) noexcept {
 
     // cast to Link*
     auto* const link = static_cast<Link*>(link_ptr);
+
+    assert(link->active_chunk_size > 0);
+    assert(link->outstanding_bytes >= link->active_chunk_size);
+    link->outstanding_bytes -= link->active_chunk_size;
+    link->active_chunk_size = 0;
 
     // set link free
     link->set_free();
@@ -37,11 +43,18 @@ void Link::set_event_queue(std::shared_ptr<EventQueue> event_queue_ptr) noexcept
     Link::event_queue = std::move(event_queue_ptr);
 }
 
-Link::Link(const Bandwidth bandwidth, const Latency latency) noexcept
+Link::Link(const Bandwidth bandwidth, const Latency latency, const LinkClass link_class) noexcept
     : bandwidth(bandwidth),
       latency(latency),
       pending_chunks(),
-      busy(false) {
+      busy(false),
+      link_class(link_class),
+      outstanding_bytes(0),
+      peak_outstanding_bytes(0),
+      transmitted_bytes(0),
+      transmitted_messages(0),
+      busy_time(0),
+      active_chunk_size(0) {
     assert(bandwidth > 0);
     assert(latency >= 0);
 
@@ -88,6 +101,44 @@ void Link::set_free() noexcept {
     busy = false;
 }
 
+void Link::reserve(const ChunkSize chunk_size) noexcept {
+    assert(chunk_size > 0);
+    outstanding_bytes += chunk_size;
+    peak_outstanding_bytes = std::max(peak_outstanding_bytes, outstanding_bytes);
+}
+
+uint64_t Link::get_outstanding_bytes() const noexcept {
+    return outstanding_bytes;
+}
+
+Bandwidth Link::get_bandwidth() const noexcept {
+    return bandwidth;
+}
+
+Latency Link::get_latency() const noexcept {
+    return latency;
+}
+
+LinkClass Link::get_link_class() const noexcept {
+    return link_class;
+}
+
+uint64_t Link::get_transmitted_bytes() const noexcept {
+    return transmitted_bytes;
+}
+
+uint64_t Link::get_transmitted_messages() const noexcept {
+    return transmitted_messages;
+}
+
+uint64_t Link::get_peak_outstanding_bytes() const noexcept {
+    return peak_outstanding_bytes;
+}
+
+EventTime Link::get_busy_time() const noexcept {
+    return busy_time;
+}
+
 EventTime Link::serialization_delay(const ChunkSize chunk_size) const noexcept {
     assert(chunk_size > 0);
 
@@ -120,6 +171,14 @@ void Link::schedule_chunk_transmission(std::unique_ptr<Chunk> chunk) noexcept {
     // get metadata
     const auto chunk_size = chunk->get_size();
     const auto current_time = Link::event_queue->get_current_time();
+    const auto serialization_time = serialization_delay(chunk_size);
+
+    assert(active_chunk_size == 0);
+    assert(outstanding_bytes >= chunk_size);
+    active_chunk_size = chunk_size;
+    transmitted_bytes += chunk_size;
+    transmitted_messages++;
+    busy_time += serialization_time;
 
     // schedule chunk arrival event
     const auto communication_time = communication_delay(chunk_size);
@@ -128,7 +187,6 @@ void Link::schedule_chunk_transmission(std::unique_ptr<Chunk> chunk) noexcept {
     Link::event_queue->schedule_event(chunk_arrival_time, Chunk::chunk_arrived_next_device, chunk_ptr);
 
     // schedule link free time
-    const auto serialization_time = serialization_delay(chunk_size);
     const auto link_free_time = current_time + serialization_time;
     auto* const link_ptr = static_cast<void*>(this);
     Link::event_queue->schedule_event(link_free_time, link_become_free, link_ptr);

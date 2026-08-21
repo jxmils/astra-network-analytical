@@ -41,7 +41,7 @@ class Link {
      * @param bandwidth bandwidth of the link
      * @param latency latency of the link
      */
-    Link(Bandwidth bandwidth, Latency latency) noexcept;
+    Link(Bandwidth bandwidth, Latency latency, LinkClass link_class) noexcept;
 
     /**
      * Try to send a chunk through the link.
@@ -75,6 +75,18 @@ class Link {
      */
     void set_free() noexcept;
 
+    /** Account for traffic assigned to this port before it reaches the link. */
+    void reserve(ChunkSize chunk_size) noexcept;
+
+    [[nodiscard]] uint64_t get_outstanding_bytes() const noexcept;
+    [[nodiscard]] Bandwidth get_bandwidth() const noexcept;
+    [[nodiscard]] Latency get_latency() const noexcept;
+    [[nodiscard]] LinkClass get_link_class() const noexcept;
+    [[nodiscard]] uint64_t get_transmitted_bytes() const noexcept;
+    [[nodiscard]] uint64_t get_transmitted_messages() const noexcept;
+    [[nodiscard]] uint64_t get_peak_outstanding_bytes() const noexcept;
+    [[nodiscard]] EventTime get_busy_time() const noexcept;
+
   private:
     /// event queue Link uses to schedule events
     static std::shared_ptr<EventQueue> event_queue;
@@ -93,6 +105,19 @@ class Link {
 
     /// flag to indicate if the link is busy
     bool busy;
+
+    /// Physical role of this link in the topology.
+    LinkClass link_class;
+
+    /// Traffic assigned to this link but not yet serialized.
+    uint64_t outstanding_bytes;
+    uint64_t peak_outstanding_bytes;
+
+    /// Aggregate retained statistics.
+    uint64_t transmitted_bytes;
+    uint64_t transmitted_messages;
+    EventTime busy_time;
+    ChunkSize active_chunk_size;
 
     /**
      * Compute the serialization delay of a chunk on the link.

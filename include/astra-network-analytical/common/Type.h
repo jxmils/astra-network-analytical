@@ -31,6 +31,19 @@ using Latency = double;
 using EventTime = uint64_t;
 
 /// Basic multi-dimensional topology building blocks
-enum class TopologyBuildingBlock { Undefined, Ring, FullyConnected, Switch, Mesh2D, Torus2D, Mesh2DSnake, Torus2DSnake };
+enum class TopologyBuildingBlock {
+    Undefined,
+    Ring,
+    FullyConnected,
+    Switch,
+    Mesh2D,
+    Torus2D,
+    Mesh2DSnake,
+    Torus2DSnake,
+    MeshRowRing,
+    MeshRowRingAdaptive,
+    MeshSwitch,
+    MeshSwitchAdaptive
+};
 
 }  // namespace NetworkAnalytical

@@ -45,7 +45,7 @@ std::shared_ptr<Device> Chunk::current_device() const noexcept {
     assert(!route.empty());
 
     // return the first npu in route
-    return route.front();
+    return route.front().device;
 }
 
 std::shared_ptr<Device> Chunk::next_device() const noexcept {
@@ -54,7 +54,23 @@ std::shared_ptr<Device> Chunk::next_device() const noexcept {
 
     // return next dest
     const auto next_dest = std::next(route.begin(), 1);
-    return *next_dest;
+    return next_dest->device;
+}
+
+LinkId Chunk::current_link() const noexcept {
+    assert(!arrived_dest());
+    return route.front().outgoing_link;
+}
+
+void Chunk::reserve_route() noexcept {
+    assert(!route.empty());
+    auto current = route.begin();
+    auto next = std::next(current);
+    while (next != route.end()) {
+        current->device->reserve(current->outgoing_link, next->device->get_id(), chunk_size);
+        ++current;
+        ++next;
+    }
 }
 
 void Chunk::mark_arrived_next_device() noexcept {

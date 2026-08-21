@@ -8,7 +8,9 @@ LICENSE file in the root directory of this source tree.
 #include "common/EventQueue.h"
 #include "congestion_aware/Chunk.h"
 #include "congestion_aware/Device.h"
+#include <iosfwd>
 #include <memory>
+#include <utility>
 #include <vector>
 
 using namespace NetworkAnalytical;
@@ -45,6 +47,13 @@ class Topology {
      * @return route from src NPU to dest NPU
      */
     [[nodiscard]] virtual Route route(DeviceId src, DeviceId dest) const noexcept = 0;
+
+    /**
+     * Size-aware route selection. Existing topologies retain their fixed route;
+     * adaptive topologies override this method.
+     */
+    [[nodiscard]] virtual Route route(DeviceId src, DeviceId dest,
+                                      ChunkSize chunk_size) const noexcept;
 
     /**
      * Initiate a transmission of a chunk.
@@ -90,6 +99,10 @@ class Topology {
      */
     [[nodiscard]] std::vector<Bandwidth> get_bandwidth_per_dim() const noexcept;
 
+    /** Retained per-port counters for audit and utilization reporting. */
+    [[nodiscard]] std::vector<LinkMetrics> get_link_metrics() const noexcept;
+    void print_link_metrics(std::ostream& output) const;
+
   protected:
     /// number of total devices in the topology
     /// device includes non-NPU devices such as switches
@@ -128,7 +141,10 @@ class Topology {
      * @param latency latency of link
      * @param bidirectional true if connection is bidirectional, false otherwise
      */
-    void connect(DeviceId src, DeviceId dest, Bandwidth bandwidth, Latency latency, bool bidirectional = true) noexcept;
+    std::pair<LinkId, LinkId> connect(
+        DeviceId src, DeviceId dest, Bandwidth bandwidth, Latency latency,
+        bool bidirectional = true,
+        LinkClass link_class = LinkClass::Generic) noexcept;
 };
 
 }  // namespace NetworkAnalyticalCongestionAware

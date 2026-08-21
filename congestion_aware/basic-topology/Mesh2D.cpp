@@ -56,20 +56,24 @@ Mesh2D::Mesh2D(const int npus_count, const Bandwidth bandwidth, const Latency la
     // X edges: connect (x,y) -> (x+1,y). Links are bidirectional, so one call per edge.
     for (auto y = 0; y < height; y++) {
         for (auto x = 0; x + 1 < width; x++) {
-            connect(id_of(x, y), id_of(x + 1, y), bandwidth, latency, true);
+            connect(id_of(x, y), id_of(x + 1, y), bandwidth, latency, true,
+                    LinkClass::BaseMesh);
         }
         if (wraparound && width > 2) {
-            connect(id_of(width - 1, y), id_of(0, y), bandwidth, latency, true);
+            connect(id_of(width - 1, y), id_of(0, y), bandwidth, latency, true,
+                    LinkClass::BaseMesh);
         }
     }
 
     // Y edges: connect (x,y) -> (x,y+1)
     for (auto x = 0; x < width; x++) {
         for (auto y = 0; y + 1 < height; y++) {
-            connect(id_of(x, y), id_of(x, y + 1), bandwidth, latency, true);
+            connect(id_of(x, y), id_of(x, y + 1), bandwidth, latency, true,
+                    LinkClass::BaseMesh);
         }
         if (wraparound && height > 2) {
-            connect(id_of(x, height - 1), id_of(x, 0), bandwidth, latency, true);
+            connect(id_of(x, height - 1), id_of(x, 0), bandwidth, latency, true,
+                    LinkClass::BaseMesh);
         }
     }
 }

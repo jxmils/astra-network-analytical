@@ -14,6 +14,8 @@ NetworkParser::NetworkParser(const std::string& path) noexcept : dims_count(-1) 
     npus_count_per_dim = {};
     bandwidth_per_dim = {};
     latency_per_dim = {};
+    extra_bandwidth_per_dim = {};
+    extra_latency_per_dim = {};
     topology_per_dim = {};
 
     try {
@@ -56,6 +58,16 @@ std::vector<Latency> NetworkParser::get_latencies_per_dim() const noexcept {
     return latency_per_dim;
 }
 
+std::vector<Bandwidth> NetworkParser::get_extra_bandwidths_per_dim() const noexcept {
+    assert(extra_bandwidth_per_dim.size() == dims_count);
+    return extra_bandwidth_per_dim;
+}
+
+std::vector<Latency> NetworkParser::get_extra_latencies_per_dim() const noexcept {
+    assert(extra_latency_per_dim.size() == dims_count);
+    return extra_latency_per_dim;
+}
+
 std::vector<TopologyBuildingBlock> NetworkParser::get_topologies_per_dim() const noexcept {
     assert(dims_count > 0);
     assert(topology_per_dim.size() == dims_count);
@@ -78,6 +90,12 @@ void NetworkParser::parse_network_config_yml(const YAML::Node& network_config) n
     npus_count_per_dim = parse_vector<int>(network_config["npus_count"]);
     bandwidth_per_dim = parse_vector<Bandwidth>(network_config["bandwidth"]);
     latency_per_dim = parse_vector<Latency>(network_config["latency"]);
+    extra_bandwidth_per_dim = network_config["extra_bandwidth"]
+                                  ? parse_vector<Bandwidth>(network_config["extra_bandwidth"])
+                                  : bandwidth_per_dim;
+    extra_latency_per_dim = network_config["extra_latency"]
+                                ? parse_vector<Latency>(network_config["extra_latency"])
+                                : latency_per_dim;
 
     // check the validity of the parsed network config
     check_validity();
@@ -110,6 +128,22 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::Torus2D;
     }
 
+    if (topology_name == "MeshRowRing") {
+        return TopologyBuildingBlock::MeshRowRing;
+    }
+
+    if (topology_name == "MeshRowRingAdaptive") {
+        return TopologyBuildingBlock::MeshRowRingAdaptive;
+    }
+
+    if (topology_name == "MeshSwitch") {
+        return TopologyBuildingBlock::MeshSwitch;
+    }
+
+    if (topology_name == "MeshSwitchAdaptive") {
+        return TopologyBuildingBlock::MeshSwitchAdaptive;
+    }
+
     if (topology_name == "Switch") {
         return TopologyBuildingBlock::Switch;
     }
@@ -139,6 +173,21 @@ void NetworkParser::check_validity() const noexcept {
         std::exit(-1);
     }
 
+
+    if (dims_count != extra_bandwidth_per_dim.size()) {
+        std::cerr << "[Error] (network/analytical) length of extra_bandwidth ("
+                  << extra_bandwidth_per_dim.size()
+                  << ") doesn't match with dims_count (" << dims_count << ")" << std::endl;
+        std::exit(-1);
+    }
+
+    if (dims_count != extra_latency_per_dim.size()) {
+        std::cerr << "[Error] (network/analytical) length of extra_latency ("
+                  << extra_latency_per_dim.size()
+                  << ") doesn't match with dims_count (" << dims_count << ")" << std::endl;
+        std::exit(-1);
+    }
+
     // npus_count should be all positive
     for (const auto& npus_count : npus_count_per_dim) {
         if (npus_count <= 1) {
@@ -157,11 +206,27 @@ void NetworkParser::check_validity() const noexcept {
         }
     }
 
+    for (const auto& bandwidth : extra_bandwidth_per_dim) {
+        if (bandwidth <= 0) {
+            std::cerr << "[Error] (network/analytical) extra bandwidth (" << bandwidth
+                      << ") should be larger than 0" << std::endl;
+            std::exit(-1);
+        }
+    }
+
     // latency should be non-negative
     for (const auto& latency : latency_per_dim) {
         if (latency < 0) {
             std::cerr << "[Error] (network/analytical) " << "latency (" << latency << ") should be non-negative"
                       << std::endl;
+            std::exit(-1);
+        }
+    }
+
+    for (const auto& latency : extra_latency_per_dim) {
+        if (latency < 0) {
+            std::cerr << "[Error] (network/analytical) extra latency (" << latency
+                      << ") should be non-negative" << std::endl;
             std::exit(-1);
         }
     }

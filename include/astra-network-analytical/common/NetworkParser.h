@@ -52,6 +52,10 @@ class NetworkParser {
      */
     [[nodiscard]] std::vector<Latency> get_latencies_per_dim() const noexcept;
 
+    /** Optional extra-fabric link parameters, defaulting to base links. */
+    [[nodiscard]] std::vector<Bandwidth> get_extra_bandwidths_per_dim() const noexcept;
+    [[nodiscard]] std::vector<Latency> get_extra_latencies_per_dim() const noexcept;
+
     /**
      * Read "topology" value and translate it into TopologyBuildingBlock
      * components
@@ -72,6 +76,9 @@ class NetworkParser {
 
     /// latency per each dimension
     std::vector<Latency> latency_per_dim;
+
+    std::vector<Bandwidth> extra_bandwidth_per_dim;
+    std::vector<Latency> extra_latency_per_dim;
 
     /// topology building block per each dimension
     std::vector<TopologyBuildingBlock> topology_per_dim;

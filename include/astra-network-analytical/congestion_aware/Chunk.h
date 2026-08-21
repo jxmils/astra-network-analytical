@@ -52,6 +52,12 @@ class Chunk {
      */
     [[nodiscard]] std::shared_ptr<Device> next_device() const noexcept;
 
+    /** Exact outgoing port selected for the current route hop. */
+    [[nodiscard]] LinkId current_link() const noexcept;
+
+    /** Reserve this chunk on every physical link in its selected route. */
+    void reserve_route() noexcept;
+
     /**
      * Mark the chunk arrived at its next device
      * i.e., drop the current device from the route

@@ -5,6 +5,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/FullyConnected.h"
+#include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Ring.h"
 #include "congestion_aware/Switch.h"
@@ -22,6 +23,8 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto npus_counts_per_dim = network_parser.get_npus_counts_per_dim();
     const auto bandwidths_per_dim = network_parser.get_bandwidths_per_dim();
     const auto latencies_per_dim = network_parser.get_latencies_per_dim();
+    const auto extra_bandwidths_per_dim = network_parser.get_extra_bandwidths_per_dim();
+    const auto extra_latencies_per_dim = network_parser.get_extra_latencies_per_dim();
 
     // for now, congestion_aware backend supports 1-dim topology only
     if (dims_count != 1) {
@@ -34,6 +37,8 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto npus_count = npus_counts_per_dim[0];
     const auto bandwidth = bandwidths_per_dim[0];
     const auto latency = latencies_per_dim[0];
+    const auto extra_bandwidth = extra_bandwidths_per_dim[0];
+    const auto extra_latency = extra_latencies_per_dim[0];
 
     switch (topology_type) {
     case TopologyBuildingBlock::Ring:
@@ -48,6 +53,26 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, false, Mesh2D::Embedding::Snake);
     case TopologyBuildingBlock::Torus2DSnake:
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, true, Mesh2D::Embedding::Snake);
+    case TopologyBuildingBlock::MeshRowRing:
+        return std::make_shared<Hybrid2D>(npus_count, bandwidth, latency,
+                                          Hybrid2D::ExtraFabric::RowRing,
+                                          Hybrid2D::RoutingPolicy::Static,
+                                          extra_bandwidth, extra_latency);
+    case TopologyBuildingBlock::MeshRowRingAdaptive:
+        return std::make_shared<Hybrid2D>(npus_count, bandwidth, latency,
+                                          Hybrid2D::ExtraFabric::RowRing,
+                                          Hybrid2D::RoutingPolicy::Adaptive,
+                                          extra_bandwidth, extra_latency);
+    case TopologyBuildingBlock::MeshSwitch:
+        return std::make_shared<Hybrid2D>(npus_count, bandwidth, latency,
+                                          Hybrid2D::ExtraFabric::Switch,
+                                          Hybrid2D::RoutingPolicy::Static,
+                                          extra_bandwidth, extra_latency);
+    case TopologyBuildingBlock::MeshSwitchAdaptive:
+        return std::make_shared<Hybrid2D>(npus_count, bandwidth, latency,
+                                          Hybrid2D::ExtraFabric::Switch,
+                                          Hybrid2D::RoutingPolicy::Adaptive,
+                                          extra_bandwidth, extra_latency);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:
