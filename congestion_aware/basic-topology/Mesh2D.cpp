@@ -6,26 +6,46 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Mesh2D.h"
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 
 using namespace NetworkAnalytical;
 using namespace NetworkAnalyticalCongestionAware;
+
+namespace {
+
+[[noreturn]] void reject_mesh_configuration(const char* message) noexcept {
+    std::cerr << "[Error] (network/analytical/congestion_aware) " << message << std::endl;
+    std::abort();
+}
+
+}  // namespace
 
 Mesh2D::Mesh2D(const int npus_count, const Bandwidth bandwidth, const Latency latency,
                const bool wraparound, const Embedding embedding) noexcept
     : wraparound(wraparound),
       BasicTopology(npus_count, npus_count, bandwidth, latency) {
-    assert(npus_count > 0);
-    assert(bandwidth > 0);
-    assert(latency >= 0);
+    if (npus_count <= 0) {
+        reject_mesh_configuration("Mesh2D/Torus2D requires a positive npus_count");
+    }
+    if (bandwidth <= 0) {
+        reject_mesh_configuration("Mesh2D/Torus2D requires positive bandwidth");
+    }
+    if (latency < 0) {
+        reject_mesh_configuration("Mesh2D/Torus2D requires non-negative latency");
+    }
 
     // square grid only, for now
     const auto side = static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))));
-    assert(side * side == npus_count && "Mesh2D/Torus2D requires a perfect-square npus_count");
+    if (side * side != npus_count) {
+        reject_mesh_configuration("Mesh2D/Torus2D requires a perfect-square npus_count");
+    }
     // The snake placement is a Hamiltonian cycle of the grid, which this
     // construction only closes for even extents. Guard it rather than
     // silently emitting a non-cycle on an odd grid.
-    assert((embedding != Embedding::Snake || side % 2 == 0) &&
-           "Snake placement requires an even grid extent");
+    if (embedding == Embedding::Snake && side % 2 != 0) {
+        reject_mesh_configuration("Snake placement requires an even grid extent");
+    }
     width = side;
     height = side;
 

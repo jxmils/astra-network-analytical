@@ -177,14 +177,15 @@ TEST_F(TestNetworkAnalyticalCongestionAware, SnakeEmbeddingIsAHamiltonianCycle) 
     }
 }
 
-#ifndef NDEBUG
 TEST_F(TestNetworkAnalyticalCongestionAware, OddSnakeExtentIsRejected) {
+    EXPECT_DEATH(
+        { const auto topology = Mesh2D(8, 200.0, 1'000.0, false); },
+        "perfect-square npus_count");
     EXPECT_DEATH(
         { const auto topology = Mesh2D(9, 200.0, 1'000.0, false,
                                        Mesh2D::Embedding::Snake); },
         "Snake placement requires an even grid extent");
 }
-#endif
 
 TEST_F(TestNetworkAnalyticalCongestionAware, Ring) {
     /// setup
