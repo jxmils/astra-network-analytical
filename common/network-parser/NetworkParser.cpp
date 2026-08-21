@@ -9,7 +9,8 @@ LICENSE file in the root directory of this source tree.
 
 using namespace NetworkAnalytical;
 
-NetworkParser::NetworkParser(const std::string& path) noexcept : dims_count(-1) {
+NetworkParser::NetworkParser(const std::string& path) noexcept
+    : dims_count(-1), direct_preference_factor(1.10) {
     // initialize values
     npus_count_per_dim = {};
     bandwidth_per_dim = {};
@@ -68,6 +69,14 @@ std::vector<Latency> NetworkParser::get_extra_latencies_per_dim() const noexcept
     return extra_latency_per_dim;
 }
 
+double NetworkParser::get_direct_preference_factor() const noexcept {
+    return direct_preference_factor;
+}
+
+const std::string& NetworkParser::get_routing_plan_path() const noexcept {
+    return routing_plan_path;
+}
+
 std::vector<TopologyBuildingBlock> NetworkParser::get_topologies_per_dim() const noexcept {
     assert(dims_count > 0);
     assert(topology_per_dim.size() == dims_count);
@@ -96,6 +105,12 @@ void NetworkParser::parse_network_config_yml(const YAML::Node& network_config) n
     extra_latency_per_dim = network_config["extra_latency"]
                                 ? parse_vector<Latency>(network_config["extra_latency"])
                                 : latency_per_dim;
+    direct_preference_factor = network_config["direct_preference_factor"]
+                                   ? network_config["direct_preference_factor"].as<double>()
+                                   : 1.10;
+    routing_plan_path = network_config["routing_plan"]
+                            ? network_config["routing_plan"].as<std::string>()
+                            : "";
 
     // check the validity of the parsed network config
     check_validity();
@@ -144,6 +159,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::MeshSwitchAdaptive;
     }
 
+    if (topology_name == "MeshSwitchDirectPreferred") {
+        return TopologyBuildingBlock::MeshSwitchDirectPreferred;
+    }
+
+    if (topology_name == "MeshSwitchOfflineOracle") {
+        return TopologyBuildingBlock::MeshSwitchOfflineOracle;
+    }
+
     if (topology_name == "Switch") {
         return TopologyBuildingBlock::Switch;
     }
@@ -185,6 +208,12 @@ void NetworkParser::check_validity() const noexcept {
         std::cerr << "[Error] (network/analytical) length of extra_latency ("
                   << extra_latency_per_dim.size()
                   << ") doesn't match with dims_count (" << dims_count << ")" << std::endl;
+        std::exit(-1);
+    }
+
+    if (direct_preference_factor < 1.0) {
+        std::cerr << "[Error] (network/analytical) direct_preference_factor ("
+                  << direct_preference_factor << ") should be at least 1" << std::endl;
         std::exit(-1);
     }
 

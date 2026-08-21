@@ -6,7 +6,10 @@ LICENSE file in the root directory of this source tree.
 #pragma once
 
 #include "congestion_aware/BasicTopology.h"
+#include <deque>
 #include <map>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -23,12 +26,14 @@ namespace NetworkAnalyticalCongestionAware {
 class Hybrid2D final : public BasicTopology {
   public:
     enum class ExtraFabric { RowRing, Switch };
-    enum class RoutingPolicy { Static, Adaptive };
+    enum class RoutingPolicy { Static, Adaptive, DirectPreferredAdaptive, OfflineOracle };
 
     Hybrid2D(int npus_count, Bandwidth bandwidth, Latency latency,
              ExtraFabric extra_fabric, RoutingPolicy routing_policy,
              Bandwidth extra_bandwidth = -1.0,
-             Latency extra_latency = -1.0) noexcept;
+             Latency extra_latency = -1.0,
+             double direct_preference_factor = 1.10,
+             std::string routing_plan_path = "") noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
@@ -36,6 +41,7 @@ class Hybrid2D final : public BasicTopology {
 
     [[nodiscard]] ExtraFabric get_extra_fabric() const noexcept;
     [[nodiscard]] RoutingPolicy get_routing_policy() const noexcept;
+    [[nodiscard]] double get_direct_preference_factor() const noexcept;
 
   private:
     struct SwitchPorts {
@@ -49,6 +55,9 @@ class Hybrid2D final : public BasicTopology {
     RoutingPolicy routing_policy;
     Bandwidth extra_bandwidth;
     Latency extra_latency;
+    double direct_preference_factor;
+    using OfflineKey = std::tuple<DeviceId, DeviceId, ChunkSize>;
+    mutable std::map<OfflineKey, std::deque<int>> offline_routes;
     std::map<std::pair<DeviceId, DeviceId>, LinkId> base_ports;
     std::map<std::pair<DeviceId, DeviceId>, LinkId> row_ring_ports;
     std::vector<std::vector<SwitchPorts>> switch_ports;
@@ -60,6 +69,7 @@ class Hybrid2D final : public BasicTopology {
     void build_base_mesh() noexcept;
     void build_row_rings() noexcept;
     void build_switch_planes() noexcept;
+    void load_offline_plan(const std::string& path) noexcept;
     void remember_bidirectional_port(
         std::map<std::pair<DeviceId, DeviceId>, LinkId>& ports,
         DeviceId first, DeviceId second,
@@ -70,6 +80,8 @@ class Hybrid2D final : public BasicTopology {
     [[nodiscard]] Route switch_route(DeviceId src, DeviceId dest, int plane) const noexcept;
     [[nodiscard]] double path_cost(const Route& path, ChunkSize chunk_size,
                                    bool include_queue) const noexcept;
+    [[nodiscard]] Route offline_route(DeviceId src, DeviceId dest,
+                                      ChunkSize chunk_size) const noexcept;
 };
 
 }  // namespace NetworkAnalyticalCongestionAware

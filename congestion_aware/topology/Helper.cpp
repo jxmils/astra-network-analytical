@@ -25,6 +25,8 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto latencies_per_dim = network_parser.get_latencies_per_dim();
     const auto extra_bandwidths_per_dim = network_parser.get_extra_bandwidths_per_dim();
     const auto extra_latencies_per_dim = network_parser.get_extra_latencies_per_dim();
+    const auto direct_preference_factor = network_parser.get_direct_preference_factor();
+    const auto& routing_plan_path = network_parser.get_routing_plan_path();
 
     // for now, congestion_aware backend supports 1-dim topology only
     if (dims_count != 1) {
@@ -73,6 +75,17 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
                                           Hybrid2D::ExtraFabric::Switch,
                                           Hybrid2D::RoutingPolicy::Adaptive,
                                           extra_bandwidth, extra_latency);
+    case TopologyBuildingBlock::MeshSwitchDirectPreferred:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::DirectPreferredAdaptive,
+            extra_bandwidth, extra_latency, direct_preference_factor);
+    case TopologyBuildingBlock::MeshSwitchOfflineOracle:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::OfflineOracle,
+            extra_bandwidth, extra_latency, direct_preference_factor,
+            routing_plan_path);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:

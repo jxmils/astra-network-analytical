@@ -12,7 +12,9 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Mesh2D.h"
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
+#include <fstream>
 #include <vector>
 
 using namespace NetworkAnalytical;
@@ -230,6 +232,60 @@ TEST_F(TestNetworkAnalyticalCongestionAware, AdaptiveRoutingAccountsForAssignedT
             EXPECT_EQ(metric.peak_outstanding_bytes == 0, metric.bytes == 0);
         }
     }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, DirectPreferenceAvoidsMarginalSwitching) {
+    const auto route_after_reservation = [this](const ChunkSize reserved_bytes) {
+        event_queue = std::make_shared<EventQueue>();
+        Topology::set_event_queue(event_queue);
+        auto topology = Hybrid2D(
+            16, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::DirectPreferredAdaptive,
+            200.0, 1'000.0, 1.10);
+        const auto reserved_route = topology.route(0, 2, reserved_bytes);
+        EXPECT_EQ(route_link_classes(reserved_route),
+                  std::vector<LinkClass>(2, LinkClass::BaseMesh));
+        topology.send(std::make_unique<Chunk>(
+            reserved_bytes, reserved_route, callback, nullptr));
+        return route_link_classes(topology.route(0, 2, chunk_size));
+    };
+
+    EXPECT_EQ(route_after_reservation(4'096),
+              std::vector<LinkClass>(2, LinkClass::BaseMesh));
+    EXPECT_EQ(route_after_reservation(chunk_size),
+              std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+
+    event_queue = std::make_shared<EventQueue>();
+    Topology::set_event_queue(event_queue);
+    auto ordinary_adaptive = Hybrid2D(
+        16, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::Adaptive);
+    const auto reserved_route = ordinary_adaptive.route(0, 2, 4'096);
+    ordinary_adaptive.send(std::make_unique<Chunk>(
+        4'096, reserved_route, callback, nullptr));
+    EXPECT_EQ(route_link_classes(ordinary_adaptive.route(0, 2, chunk_size)),
+              std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, OfflinePlanSelectsExactRoutes) {
+    const auto plan_path = std::string("hybrid-offline-plan-test.txt");
+    {
+        auto output = std::ofstream(plan_path);
+        ASSERT_TRUE(output.good());
+        output << "0 15 " << chunk_size << " DIRECT\n"
+               << "0 15 " << chunk_size << " SWITCH0\n"
+               << "0 15 " << chunk_size << " SWITCH1\n";
+    }
+    auto topology = Hybrid2D(
+        16, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::OfflineOracle,
+        200.0, 1'000.0, 1.10, plan_path);
+
+    EXPECT_EQ(route_link_classes(topology.route(0, 15, chunk_size)),
+              std::vector<LinkClass>(6, LinkClass::BaseMesh));
+    EXPECT_EQ(route_ids(topology.route(0, 15, chunk_size))[1], 16);
+    EXPECT_EQ(route_ids(topology.route(0, 15, chunk_size))[1], 17);
+    EXPECT_EQ(std::remove(plan_path.c_str()), 0);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, ExtraLinkLatencyChangesPhysicalArrivalDelay) {

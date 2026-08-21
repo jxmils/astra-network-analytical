@@ -43,7 +43,9 @@ enum class TopologyBuildingBlock {
     MeshRowRing,
     MeshRowRingAdaptive,
     MeshSwitch,
-    MeshSwitchAdaptive
+    MeshSwitchAdaptive,
+    MeshSwitchDirectPreferred,
+    MeshSwitchOfflineOracle
 };
 
 }  // namespace NetworkAnalytical

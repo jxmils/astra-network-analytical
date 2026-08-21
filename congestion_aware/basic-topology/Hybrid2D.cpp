@@ -9,14 +9,16 @@ LICENSE file in the root directory of this source tree.
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 using namespace NetworkAnalytical;
 using namespace NetworkAnalyticalCongestionAware;
 
 namespace {
 
-[[noreturn]] void reject_hybrid_configuration(const char* message) noexcept {
+[[noreturn]] void reject_hybrid_configuration(const std::string& message) noexcept {
     std::cerr << "[Error] (network/analytical/congestion_aware) " << message << std::endl;
     std::abort();
 }
@@ -27,7 +29,9 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                    const Latency latency, const ExtraFabric extra_fabric,
                    const RoutingPolicy routing_policy,
                    const Bandwidth requested_extra_bandwidth,
-                   const Latency requested_extra_latency) noexcept
+                   const Latency requested_extra_latency,
+                   const double direct_preference_factor,
+                   std::string routing_plan_path) noexcept
     : BasicTopology(npus_count,
                     npus_count + (extra_fabric == ExtraFabric::Switch ? 2 : 0),
                     bandwidth, latency),
@@ -38,22 +42,42 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
       extra_bandwidth(requested_extra_bandwidth > 0 ? requested_extra_bandwidth
                                                     : bandwidth),
       extra_latency(requested_extra_latency >= 0 ? requested_extra_latency
-                                                 : latency) {
+                                                 : latency),
+      direct_preference_factor(direct_preference_factor) {
     if (width * height != npus_count) {
         reject_hybrid_configuration("hybrid topology requires a perfect-square npus_count");
     }
     if (width < 3) {
         reject_hybrid_configuration("hybrid topology requires a grid extent of at least three");
     }
+    if (direct_preference_factor < 1.0) {
+        reject_hybrid_configuration("direct preference factor must be at least one");
+    }
 
     if (extra_fabric == ExtraFabric::RowRing) {
+        if (routing_policy != RoutingPolicy::Static &&
+            routing_policy != RoutingPolicy::Adaptive) {
+            reject_hybrid_configuration(
+                "direct-preferred and offline routing require the switch fabric");
+        }
         basic_topology_type = routing_policy == RoutingPolicy::Adaptive
                                   ? TopologyBuildingBlock::MeshRowRingAdaptive
                                   : TopologyBuildingBlock::MeshRowRing;
     } else {
-        basic_topology_type = routing_policy == RoutingPolicy::Adaptive
-                                  ? TopologyBuildingBlock::MeshSwitchAdaptive
-                                  : TopologyBuildingBlock::MeshSwitch;
+        switch (routing_policy) {
+        case RoutingPolicy::Static:
+            basic_topology_type = TopologyBuildingBlock::MeshSwitch;
+            break;
+        case RoutingPolicy::Adaptive:
+            basic_topology_type = TopologyBuildingBlock::MeshSwitchAdaptive;
+            break;
+        case RoutingPolicy::DirectPreferredAdaptive:
+            basic_topology_type = TopologyBuildingBlock::MeshSwitchDirectPreferred;
+            break;
+        case RoutingPolicy::OfflineOracle:
+            basic_topology_type = TopologyBuildingBlock::MeshSwitchOfflineOracle;
+            break;
+        }
     }
 
     build_base_mesh();
@@ -61,6 +85,9 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         build_row_rings();
     } else {
         build_switch_planes();
+    }
+    if (routing_policy == RoutingPolicy::OfflineOracle) {
+        load_offline_plan(routing_plan_path);
     }
 }
 
@@ -127,6 +154,56 @@ void Hybrid2D::build_switch_planes() noexcept {
                                        LinkClass::SwitchUplink);
             switch_ports[plane][npu] = {ports.first, ports.second};
         }
+    }
+}
+
+void Hybrid2D::load_offline_plan(const std::string& path) noexcept {
+    if (path.empty()) {
+        reject_hybrid_configuration("offline routing requires a routing_plan file");
+    }
+    auto input = std::ifstream(path);
+    if (!input) {
+        reject_hybrid_configuration("could not open offline routing plan: " + path);
+    }
+
+    auto line = std::string();
+    auto line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+        auto parser = std::istringstream(line);
+        auto src = DeviceId();
+        auto dest = DeviceId();
+        auto chunk_size = ChunkSize();
+        auto route_name = std::string();
+        auto trailing = std::string();
+        if (!(parser >> src >> dest >> chunk_size >> route_name) || parser >> trailing) {
+            reject_hybrid_configuration(
+                "invalid offline routing-plan line " + std::to_string(line_number));
+        }
+        if (src < 0 || src >= npus_count || dest < 0 || dest >= npus_count ||
+            src == dest || chunk_size == 0) {
+            reject_hybrid_configuration(
+                "invalid offline routing-plan request on line " +
+                std::to_string(line_number));
+        }
+        auto route_id = -1;
+        if (route_name == "DIRECT") {
+            route_id = 0;
+        } else if (route_name == "SWITCH0") {
+            route_id = 1;
+        } else if (route_name == "SWITCH1") {
+            route_id = 2;
+        } else {
+            reject_hybrid_configuration(
+                "invalid offline route on line " + std::to_string(line_number));
+        }
+        offline_routes[{src, dest, chunk_size}].push_back(route_id);
+    }
+    if (offline_routes.empty()) {
+        reject_hybrid_configuration("offline routing plan contains no requests");
     }
 }
 
@@ -199,6 +276,24 @@ Route Hybrid2D::switch_route(const DeviceId src, const DeviceId dest,
     return path;
 }
 
+Route Hybrid2D::offline_route(const DeviceId src, const DeviceId dest,
+                              const ChunkSize chunk_size) const noexcept {
+    const auto key = OfflineKey{src, dest, chunk_size};
+    const auto found = offline_routes.find(key);
+    if (found == offline_routes.end() || found->second.empty()) {
+        reject_hybrid_configuration(
+            "offline routing plan has no remaining assignment for " +
+            std::to_string(src) + " -> " + std::to_string(dest) +
+            " size " + std::to_string(chunk_size));
+    }
+    const auto route_id = found->second.front();
+    found->second.pop_front();
+    if (route_id == 0) {
+        return mesh_route(src, dest);
+    }
+    return switch_route(src, dest, route_id - 1);
+}
+
 double Hybrid2D::path_cost(const Route& path, const ChunkSize chunk_size,
                            const bool include_queue) const noexcept {
     if (path.size() <= 1) {
@@ -244,8 +339,11 @@ Route Hybrid2D::route(const DeviceId src, const DeviceId dest,
     if (src == dest) {
         return direct;
     }
+    if (routing_policy == RoutingPolicy::OfflineOracle) {
+        return offline_route(src, dest, chunk_size);
+    }
 
-    const auto include_queue = routing_policy == RoutingPolicy::Adaptive;
+    const auto include_queue = routing_policy != RoutingPolicy::Static;
     const auto direct_cost = path_cost(direct, chunk_size, include_queue);
 
     if (extra_fabric == ExtraFabric::RowRing) {
@@ -266,6 +364,18 @@ Route Hybrid2D::route(const DeviceId src, const DeviceId dest,
     const auto preferred_cost = path_cost(preferred_switch, chunk_size, include_queue);
     const auto other_cost = path_cost(other_switch, chunk_size, include_queue);
 
+    auto best_switch_cost = preferred_cost;
+    auto best_switch = preferred_switch;
+    if (other_cost < best_switch_cost) {
+        best_switch_cost = other_cost;
+        best_switch = other_switch;
+    }
+    if (routing_policy == RoutingPolicy::DirectPreferredAdaptive) {
+        return direct_cost <= direct_preference_factor * best_switch_cost
+                   ? direct
+                   : best_switch;
+    }
+
     auto best_cost = direct_cost;
     auto best = direct;
     if (preferred_cost < best_cost) {
@@ -284,4 +394,8 @@ Hybrid2D::ExtraFabric Hybrid2D::get_extra_fabric() const noexcept {
 
 Hybrid2D::RoutingPolicy Hybrid2D::get_routing_policy() const noexcept {
     return routing_policy;
+}
+
+double Hybrid2D::get_direct_preference_factor() const noexcept {
+    return direct_preference_factor;
 }
