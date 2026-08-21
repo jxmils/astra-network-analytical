@@ -143,6 +143,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::Torus2D;
     }
 
+    if (topology_name == "Mesh3D") {
+        return TopologyBuildingBlock::Mesh3D;
+    }
+
+    if (topology_name == "Torus3D") {
+        return TopologyBuildingBlock::Torus3D;
+    }
+
     if (topology_name == "MeshRowRing") {
         return TopologyBuildingBlock::MeshRowRing;
     }
@@ -165,6 +173,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
 
     if (topology_name == "MeshSwitchOfflineOracle") {
         return TopologyBuildingBlock::MeshSwitchOfflineOracle;
+    }
+
+    if (topology_name == "TorusSwitchAdaptive") {
+        return TopologyBuildingBlock::TorusSwitchAdaptive;
+    }
+
+    if (topology_name == "MultiSwitch6Adaptive") {
+        return TopologyBuildingBlock::MultiSwitch6Adaptive;
     }
 
     if (topology_name == "Switch") {

@@ -10,11 +10,14 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/Mesh2D.h"
+#include "congestion_aware/Mesh3D.h"
+#include "congestion_aware/MultiPlaneSwitch.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <fstream>
+#include <set>
 #include <vector>
 
 using namespace NetworkAnalytical;
@@ -427,6 +430,109 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusAntipodalTiesAreBalanced) {
 
     EXPECT_EQ(x_forward, x_backward);
     EXPECT_EQ(y_forward, y_backward);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, ThreeDimensionalFabricsHaveExactPorts) {
+    constexpr auto extent = 4;
+    constexpr auto npus = extent * extent * extent;
+    for (const auto wraparound : {false, true}) {
+        const auto topology = Mesh3D(npus, 200.0, 1'000.0, wraparound);
+        auto directed_links = 0;
+        for (auto id = 0; id < npus; ++id) {
+            const auto neighbors = topology.route(id, id).front()
+                                       ->get_connected_device_ids();
+            const auto distinct = std::set<DeviceId>(neighbors.begin(), neighbors.end());
+            EXPECT_EQ(distinct.size(), neighbors.size());
+            const auto x = id % extent;
+            const auto y = (id / extent) % extent;
+            const auto z = id / (extent * extent);
+            const auto expected_degree = wraparound
+                                             ? 6
+                                             : 6 - (x == 0) - (x == extent - 1) -
+                                                   (y == 0) - (y == extent - 1) -
+                                                   (z == 0) - (z == extent - 1);
+            EXPECT_EQ(neighbors.size(), expected_degree) << "device " << id;
+            directed_links += static_cast<int>(neighbors.size());
+        }
+        EXPECT_EQ(directed_links,
+                  wraparound ? 6 * npus
+                             : 6 * extent * extent * (extent - 1));
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, ThreeDimensionalRoutesAreMinimal) {
+    constexpr auto extent = 4;
+    constexpr auto npus = extent * extent * extent;
+    for (const auto wraparound : {false, true}) {
+        const auto topology = Mesh3D(npus, 200.0, 1'000.0, wraparound);
+        for (auto source = 0; source < npus; ++source) {
+            for (auto destination = 0; destination < npus; ++destination) {
+                const auto path = topology.route(source, destination);
+                const auto ids = route_ids(path);
+                EXPECT_EQ(ids.front(), source);
+                EXPECT_EQ(ids.back(), destination);
+                EXPECT_EQ(ids, route_ids(topology.route(source, destination)));
+                auto distance = 0;
+                for (const auto stride : {1, extent, extent * extent}) {
+                    const auto source_coordinate = (source / stride) % extent;
+                    const auto destination_coordinate =
+                        (destination / stride) % extent;
+                    auto axis_distance = std::abs(destination_coordinate -
+                                                  source_coordinate);
+                    if (wraparound) {
+                        axis_distance = std::min(axis_distance,
+                                                 extent - axis_distance);
+                    }
+                    distance += axis_distance;
+                }
+                EXPECT_EQ(ids.size() - 1, static_cast<std::size_t>(distance));
+                auto current = path.begin();
+                auto next = std::next(current);
+                while (next != path.end()) {
+                    EXPECT_TRUE(has_outgoing_link(current->device,
+                                                  next->device->get_id()));
+                    ++current;
+                    ++next;
+                }
+            }
+        }
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, SixPortBaselinesUseExactEndpointPorts) {
+    constexpr auto npus = 64;
+    const auto hybrid = Hybrid2D(
+        npus, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::Adaptive, 200.0, 1'000.0, 1.10, "", true);
+    EXPECT_EQ(count_links(hybrid.get_link_metrics(), LinkClass::BaseMesh),
+              4 * npus);
+    EXPECT_EQ(count_links(hybrid.get_link_metrics(), LinkClass::SwitchUplink),
+              4 * npus);
+    for (auto npu = 0; npu < npus; ++npu) {
+        EXPECT_EQ(hybrid.route(npu, npu).front()
+                      ->get_connected_device_ids().size(),
+                  6);
+    }
+
+    auto full_switch = MultiPlaneSwitch(npus, 200.0, 1'000.0);
+    EXPECT_EQ(count_links(full_switch.get_link_metrics(), LinkClass::SwitchUplink),
+              2 * npus * MultiPlaneSwitch::Planes);
+    for (auto npu = 0; npu < npus; ++npu) {
+        EXPECT_EQ(full_switch.route(npu, npu).front()
+                      ->get_connected_device_ids().size(),
+                  MultiPlaneSwitch::Planes);
+    }
+
+    auto selected_planes = std::set<DeviceId>();
+    for (auto request = 0; request < MultiPlaneSwitch::Planes; ++request) {
+        const auto path = full_switch.route(0, 63, chunk_size);
+        const auto ids = route_ids(path);
+        ASSERT_EQ(ids.size(), 3);
+        selected_planes.insert(ids[1]);
+        full_switch.send(std::make_unique<Chunk>(
+            chunk_size, path, callback, nullptr));
+    }
+    EXPECT_EQ(selected_planes.size(), MultiPlaneSwitch::Planes);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, SnakeEmbeddingIsAHamiltonianCycle) {

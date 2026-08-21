@@ -7,6 +7,8 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/FullyConnected.h"
 #include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/Mesh2D.h"
+#include "congestion_aware/Mesh3D.h"
+#include "congestion_aware/MultiPlaneSwitch.h"
 #include "congestion_aware/Ring.h"
 #include "congestion_aware/Switch.h"
 #include <cstdlib>
@@ -51,6 +53,10 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, false);
     case TopologyBuildingBlock::Torus2D:
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, true);
+    case TopologyBuildingBlock::Mesh3D:
+        return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, false);
+    case TopologyBuildingBlock::Torus3D:
+        return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, true);
     case TopologyBuildingBlock::Mesh2DSnake:
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, false, Mesh2D::Embedding::Snake);
     case TopologyBuildingBlock::Torus2DSnake:
@@ -86,6 +92,13 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             Hybrid2D::RoutingPolicy::OfflineOracle,
             extra_bandwidth, extra_latency, direct_preference_factor,
             routing_plan_path);
+    case TopologyBuildingBlock::TorusSwitchAdaptive:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::Adaptive, extra_bandwidth, extra_latency,
+            direct_preference_factor, "", true);
+    case TopologyBuildingBlock::MultiSwitch6Adaptive:
+        return std::make_shared<MultiPlaneSwitch>(npus_count, bandwidth, latency);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:

@@ -38,6 +38,8 @@ enum class TopologyBuildingBlock {
     Switch,
     Mesh2D,
     Torus2D,
+    Mesh3D,
+    Torus3D,
     Mesh2DSnake,
     Torus2DSnake,
     MeshRowRing,
@@ -45,7 +47,9 @@ enum class TopologyBuildingBlock {
     MeshSwitch,
     MeshSwitchAdaptive,
     MeshSwitchDirectPreferred,
-    MeshSwitchOfflineOracle
+    MeshSwitchOfflineOracle,
+    TorusSwitchAdaptive,
+    MultiSwitch6Adaptive
 };
 
 }  // namespace NetworkAnalytical

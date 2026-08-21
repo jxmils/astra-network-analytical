@@ -31,7 +31,8 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                    const Bandwidth requested_extra_bandwidth,
                    const Latency requested_extra_latency,
                    const double direct_preference_factor,
-                   std::string routing_plan_path) noexcept
+                   std::string routing_plan_path,
+                   const bool base_wraparound) noexcept
     : BasicTopology(npus_count,
                     npus_count + (extra_fabric == ExtraFabric::Switch ? 2 : 0),
                     bandwidth, latency),
@@ -43,7 +44,8 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                                                     : bandwidth),
       extra_latency(requested_extra_latency >= 0 ? requested_extra_latency
                                                  : latency),
-      direct_preference_factor(direct_preference_factor) {
+      direct_preference_factor(direct_preference_factor),
+      base_wraparound(base_wraparound) {
     if (width * height != npus_count) {
         reject_hybrid_configuration("hybrid topology requires a perfect-square npus_count");
     }
@@ -52,6 +54,11 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
     }
     if (direct_preference_factor < 1.0) {
         reject_hybrid_configuration("direct preference factor must be at least one");
+    }
+    if (base_wraparound &&
+        (extra_fabric != ExtraFabric::Switch || routing_policy != RoutingPolicy::Adaptive)) {
+        reject_hybrid_configuration(
+            "wraparound hybrid currently requires adaptive switch routing");
     }
 
     if (extra_fabric == ExtraFabric::RowRing) {
@@ -63,6 +70,8 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         basic_topology_type = routing_policy == RoutingPolicy::Adaptive
                                   ? TopologyBuildingBlock::MeshRowRingAdaptive
                                   : TopologyBuildingBlock::MeshRowRing;
+    } else if (base_wraparound) {
+        basic_topology_type = TopologyBuildingBlock::TorusSwitchAdaptive;
     } else {
         switch (routing_policy) {
         case RoutingPolicy::Static:
@@ -103,6 +112,23 @@ DeviceId Hybrid2D::id_of(const int x, const int y) const noexcept {
     return y * width + x;
 }
 
+int Hybrid2D::step_towards(const int current, const int target, const int extent,
+                           const bool tie_backward) const noexcept {
+    if (!base_wraparound) {
+        return target > current ? current + 1 : current - 1;
+    }
+    const auto forward = (target - current + extent) % extent;
+    const auto backward = extent - forward;
+    if (forward < backward) {
+        return (current + 1) % extent;
+    }
+    if (backward < forward) {
+        return (current - 1 + extent) % extent;
+    }
+    return tie_backward ? (current - 1 + extent) % extent
+                        : (current + 1) % extent;
+}
+
 void Hybrid2D::remember_bidirectional_port(
     std::map<std::pair<DeviceId, DeviceId>, LinkId>& ports,
     const DeviceId first, const DeviceId second,
@@ -120,6 +146,14 @@ void Hybrid2D::build_base_mesh() noexcept {
                 base_ports, first, second,
                 connect(first, second, bandwidth, latency, true, LinkClass::BaseMesh));
         }
+        if (base_wraparound) {
+            const auto first = id_of(width - 1, y);
+            const auto second = id_of(0, y);
+            remember_bidirectional_port(
+                base_ports, first, second,
+                connect(first, second, bandwidth, latency, true,
+                        LinkClass::BaseMesh));
+        }
     }
     for (auto x = 0; x < width; ++x) {
         for (auto y = 0; y + 1 < height; ++y) {
@@ -128,6 +162,14 @@ void Hybrid2D::build_base_mesh() noexcept {
             remember_bidirectional_port(
                 base_ports, first, second,
                 connect(first, second, bandwidth, latency, true, LinkClass::BaseMesh));
+        }
+        if (base_wraparound) {
+            const auto first = id_of(x, height - 1);
+            const auto second = id_of(x, 0);
+            remember_bidirectional_port(
+                base_ports, first, second,
+                connect(first, second, bandwidth, latency, true,
+                        LinkClass::BaseMesh));
         }
     }
 }
@@ -214,16 +256,20 @@ Route Hybrid2D::mesh_route(const DeviceId src, const DeviceId dest) const noexce
     auto y = y_of(src);
     const auto destination_x = x_of(dest);
     const auto destination_y = y_of(dest);
+    const auto x_tie_backward = (x & 1) != 0;
+    const auto y_tie_backward = (y & 1) != 0;
 
     while (x != destination_x) {
-        const auto next_x = x + (destination_x > x ? 1 : -1);
+        const auto next_x = step_towards(x, destination_x, width,
+                                         x_tie_backward);
         const auto next = id_of(next_x, y);
         path.emplace_back(devices[current], base_ports.at({current, next}));
         current = next;
         x = next_x;
     }
     while (y != destination_y) {
-        const auto next_y = y + (destination_y > y ? 1 : -1);
+        const auto next_y = step_towards(y, destination_y, height,
+                                         y_tie_backward);
         const auto next = id_of(x, next_y);
         path.emplace_back(devices[current], base_ports.at({current, next}));
         current = next;
