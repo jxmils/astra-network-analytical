@@ -9,6 +9,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Type.h"
 #include <map>
 #include <memory>
+#include <vector>
 
 using namespace NetworkAnalytical;
 
@@ -33,6 +34,13 @@ class Device {
      * @return id of the device
      */
     [[nodiscard]] DeviceId get_id() const noexcept;
+
+    /**
+     * Return the destination IDs of this device's outgoing links.
+     *
+     * This is topology metadata only; callers cannot mutate links through it.
+     */
+    [[nodiscard]] std::vector<DeviceId> get_connected_device_ids() const noexcept;
 
     /**
      * Initiate a chunk transmission.

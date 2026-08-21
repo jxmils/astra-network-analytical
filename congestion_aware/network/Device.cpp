@@ -20,6 +20,15 @@ DeviceId Device::get_id() const noexcept {
     return device_id;
 }
 
+std::vector<DeviceId> Device::get_connected_device_ids() const noexcept {
+    auto connected_device_ids = std::vector<DeviceId>();
+    connected_device_ids.reserve(links.size());
+    for (const auto& connection : links) {
+        connected_device_ids.push_back(connection.first);
+    }
+    return connected_device_ids;
+}
+
 void Device::send(std::unique_ptr<Chunk> chunk) noexcept {
     // assert the validity of the chunk
     assert(chunk != nullptr);
