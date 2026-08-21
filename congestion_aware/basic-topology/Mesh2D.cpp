@@ -21,10 +21,15 @@ Mesh2D::Mesh2D(const int npus_count, const Bandwidth bandwidth, const Latency la
     // square grid only, for now
     const auto side = static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))));
     assert(side * side == npus_count && "Mesh2D/Torus2D requires a perfect-square npus_count");
+    // The snake placement is a Hamiltonian cycle of the grid, which this
+    // construction only closes for even extents. Guard it rather than
+    // silently emitting a non-cycle on an odd grid.
+    assert((embedding != Embedding::Snake || side % 2 == 0) &&
+           "Snake placement requires an even grid extent");
     width = side;
     height = side;
 
-    basic_topology_type = TopologyBuildingBlock::Ring;
+    basic_topology_type = wraparound ? TopologyBuildingBlock::Torus2D : TopologyBuildingBlock::Mesh2D;
 
     build_placement(embedding);
 
