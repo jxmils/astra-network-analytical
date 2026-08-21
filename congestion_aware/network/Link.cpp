@@ -54,6 +54,7 @@ Link::Link(const Bandwidth bandwidth, const Latency latency, const LinkClass lin
       transmitted_bytes(0),
       transmitted_messages(0),
       busy_time(0),
+      queue_wait_time(0),
       active_chunk_size(0) {
     assert(bandwidth > 0);
     assert(latency >= 0);
@@ -64,6 +65,8 @@ Link::Link(const Bandwidth bandwidth, const Latency latency, const LinkClass lin
 
 void Link::send(std::unique_ptr<Chunk> chunk) noexcept {
     assert(chunk != nullptr);
+
+    chunk->mark_link_queued(event_queue->get_current_time());
 
     if (busy) {
         // link is busy, add to pending chunks
@@ -139,6 +142,10 @@ EventTime Link::get_busy_time() const noexcept {
     return busy_time;
 }
 
+EventTime Link::get_queue_wait_time() const noexcept {
+    return queue_wait_time;
+}
+
 EventTime Link::serialization_delay(const ChunkSize chunk_size) const noexcept {
     assert(chunk_size > 0);
 
@@ -172,6 +179,9 @@ void Link::schedule_chunk_transmission(std::unique_ptr<Chunk> chunk) noexcept {
     const auto chunk_size = chunk->get_size();
     const auto current_time = Link::event_queue->get_current_time();
     const auto serialization_time = serialization_delay(chunk_size);
+
+    assert(current_time >= chunk->get_link_queued_time());
+    queue_wait_time += current_time - chunk->get_link_queued_time();
 
     assert(active_chunk_size == 0);
     assert(outstanding_bytes >= chunk_size);

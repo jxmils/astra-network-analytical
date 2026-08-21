@@ -24,6 +24,13 @@ constexpr LinkId AutomaticLink = -1;
 
 enum class LinkClass { Generic, BaseMesh, RowRing, SwitchUplink };
 
+enum class RouteClass { Direct, Switch };
+
+[[nodiscard]] constexpr std::string_view route_class_name(
+    const RouteClass route_class) noexcept {
+    return route_class == RouteClass::Switch ? "switch" : "direct";
+}
+
 [[nodiscard]] constexpr std::string_view link_class_name(const LinkClass link_class) noexcept {
     switch (link_class) {
     case LinkClass::Generic:
@@ -47,6 +54,18 @@ struct LinkMetrics {
     uint64_t messages;
     uint64_t peak_outstanding_bytes;
     NetworkAnalytical::EventTime busy_time;
+    NetworkAnalytical::EventTime queue_wait_time;
+};
+
+/** Aggregate selected-route statistics grouped by route class and hop count. */
+struct RouteMetrics {
+    RouteClass route_class;
+    int hops;
+    uint64_t messages;
+    uint64_t payload_bytes;
+    uint64_t byte_hops;
+    NetworkAnalytical::EventTime propagation_time;
+    NetworkAnalytical::EventTime serialization_time;
 };
 
 /**

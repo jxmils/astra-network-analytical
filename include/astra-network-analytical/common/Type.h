@@ -48,6 +48,8 @@ enum class TopologyBuildingBlock {
     MeshSwitchAdaptive,
     MeshSwitchDirectPreferred,
     MeshSwitchOfflineOracle,
+    TorusSwitchDirectOnly,
+    TorusSwitchSwitchOnly,
     TorusSwitchAdaptive,
     MultiSwitch6Adaptive
 };

@@ -56,9 +56,12 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         reject_hybrid_configuration("direct preference factor must be at least one");
     }
     if (base_wraparound &&
-        (extra_fabric != ExtraFabric::Switch || routing_policy != RoutingPolicy::Adaptive)) {
+        (extra_fabric != ExtraFabric::Switch ||
+         (routing_policy != RoutingPolicy::Adaptive &&
+          routing_policy != RoutingPolicy::DirectOnly &&
+          routing_policy != RoutingPolicy::SwitchOnly))) {
         reject_hybrid_configuration(
-            "wraparound hybrid currently requires adaptive switch routing");
+            "wraparound hybrid requires adaptive or forced switch routing");
     }
 
     if (extra_fabric == ExtraFabric::RowRing) {
@@ -71,7 +74,13 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                                   ? TopologyBuildingBlock::MeshRowRingAdaptive
                                   : TopologyBuildingBlock::MeshRowRing;
     } else if (base_wraparound) {
-        basic_topology_type = TopologyBuildingBlock::TorusSwitchAdaptive;
+        if (routing_policy == RoutingPolicy::DirectOnly) {
+            basic_topology_type = TopologyBuildingBlock::TorusSwitchDirectOnly;
+        } else if (routing_policy == RoutingPolicy::SwitchOnly) {
+            basic_topology_type = TopologyBuildingBlock::TorusSwitchSwitchOnly;
+        } else {
+            basic_topology_type = TopologyBuildingBlock::TorusSwitchAdaptive;
+        }
     } else {
         switch (routing_policy) {
         case RoutingPolicy::Static:
@@ -86,6 +95,10 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         case RoutingPolicy::OfflineOracle:
             basic_topology_type = TopologyBuildingBlock::MeshSwitchOfflineOracle;
             break;
+        case RoutingPolicy::DirectOnly:
+        case RoutingPolicy::SwitchOnly:
+            reject_hybrid_configuration(
+                "forced routing policies require the wraparound hybrid");
         }
     }
 
@@ -388,6 +401,9 @@ Route Hybrid2D::route(const DeviceId src, const DeviceId dest,
     if (routing_policy == RoutingPolicy::OfflineOracle) {
         return offline_route(src, dest, chunk_size);
     }
+    if (routing_policy == RoutingPolicy::DirectOnly) {
+        return direct;
+    }
 
     const auto include_queue = routing_policy != RoutingPolicy::Static;
     const auto direct_cost = path_cost(direct, chunk_size, include_queue);
@@ -415,6 +431,9 @@ Route Hybrid2D::route(const DeviceId src, const DeviceId dest,
     if (other_cost < best_switch_cost) {
         best_switch_cost = other_cost;
         best_switch = other_switch;
+    }
+    if (routing_policy == RoutingPolicy::SwitchOnly) {
+        return best_switch;
     }
     if (routing_policy == RoutingPolicy::DirectPreferredAdaptive) {
         return direct_cost <= direct_preference_factor * best_switch_cost

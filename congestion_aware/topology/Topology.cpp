@@ -5,6 +5,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "congestion_aware/Topology.h"
 #include "congestion_aware/Link.h"
+#include "common/NetworkFunction.h"
 #include <cassert>
 #include <ostream>
 
@@ -79,12 +80,76 @@ void Topology::print_link_metrics(std::ostream& output) const {
                << " bytes=" << metric.bytes
                << " messages=" << metric.messages
                << " peak_outstanding_bytes=" << metric.peak_outstanding_bytes
-               << " busy_ns=" << metric.busy_time << '\n';
+               << " busy_ns=" << metric.busy_time
+               << " queue_wait_ns=" << metric.queue_wait_time << '\n';
     }
+}
+
+std::vector<RouteMetrics> Topology::get_route_metrics() const noexcept {
+    auto metrics = std::vector<RouteMetrics>();
+    metrics.reserve(route_metrics.size());
+    for (const auto& [key, metric] : route_metrics) {
+        static_cast<void>(key);
+        metrics.push_back(metric);
+    }
+    return metrics;
+}
+
+void Topology::print_route_metrics(std::ostream& output) const {
+    for (const auto& metric : get_route_metrics()) {
+        output << "NETWORK_ROUTE class=" << route_class_name(metric.route_class)
+               << " hops=" << metric.hops
+               << " messages=" << metric.messages
+               << " payload_bytes=" << metric.payload_bytes
+               << " byte_hops=" << metric.byte_hops
+               << " propagation_ns=" << metric.propagation_time
+               << " serialization_ns=" << metric.serialization_time << '\n';
+    }
+}
+
+void Topology::record_route(const Route& route, const ChunkSize chunk_size) noexcept {
+    assert(route.size() > 1);
+    assert(chunk_size > 0);
+    auto route_class = RouteClass::Direct;
+    auto propagation_time = EventTime(0);
+    auto serialization_time = EventTime(0);
+    auto hops = 0;
+    auto current = route.begin();
+    auto next = std::next(current);
+    while (next != route.end()) {
+        const auto link_id = current->device->resolve_link(
+            current->outgoing_link, next->device->get_id());
+        if (current->device->get_link_class(link_id) == LinkClass::SwitchUplink) {
+            route_class = RouteClass::Switch;
+        }
+        propagation_time += static_cast<EventTime>(
+            current->device->get_link_latency(link_id));
+        serialization_time += static_cast<EventTime>(
+            static_cast<double>(chunk_size) /
+            bw_GBps_to_Bpns(current->device->get_link_bandwidth(link_id)));
+        ++hops;
+        ++current;
+        ++next;
+    }
+
+    const auto key = std::make_pair(route_class, hops);
+    auto found = route_metrics.find(key);
+    if (found == route_metrics.end()) {
+        found = route_metrics.emplace(
+            key, RouteMetrics{route_class, hops, 0, 0, 0, 0, 0}).first;
+    }
+    auto& metric = found->second;
+    metric.messages++;
+    metric.payload_bytes += chunk_size;
+    metric.byte_hops += chunk_size * static_cast<uint64_t>(hops);
+    metric.propagation_time += propagation_time;
+    metric.serialization_time += serialization_time;
 }
 
 void Topology::send(std::unique_ptr<Chunk> chunk) noexcept {
     assert(chunk != nullptr);
+
+    record_route(chunk->get_route(), chunk->get_size());
 
     // get src npu node_id
     const auto src = chunk->current_device()->get_id();

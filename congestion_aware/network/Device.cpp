@@ -43,7 +43,8 @@ std::vector<LinkMetrics> Device::get_link_metrics() const noexcept {
                            link->get_transmitted_bytes(),
                            link->get_transmitted_messages(),
                            link->get_peak_outstanding_bytes(),
-                           link->get_busy_time()});
+                           link->get_busy_time(),
+                           link->get_queue_wait_time()});
     }
     return metrics;
 }
@@ -73,6 +74,11 @@ Latency Device::get_link_latency(const LinkId link_id) const noexcept {
     return links.at(link_id).link->get_latency();
 }
 
+LinkId Device::resolve_link(const LinkId link_id,
+                            const DeviceId destination) const noexcept {
+    return link_id == AutomaticLink ? unique_link_to(destination) : link_id;
+}
+
 void Device::send(std::unique_ptr<Chunk> chunk) noexcept {
     // assert the validity of the chunk
     assert(chunk != nullptr);
@@ -85,10 +91,7 @@ void Device::send(std::unique_ptr<Chunk> chunk) noexcept {
 
     // get next dest
     const auto next_dest_id = chunk->next_device()->get_id();
-    auto link_id = chunk->current_link();
-    if (link_id == AutomaticLink) {
-        link_id = unique_link_to(next_dest_id);
-    }
+    const auto link_id = resolve_link(chunk->current_link(), next_dest_id);
 
     // assert the next dest is connected to this node
     assert(link_connects(link_id, next_dest_id));
@@ -112,9 +115,7 @@ LinkId Device::connect(const DeviceId id, const Bandwidth bandwidth, const Laten
 
 void Device::reserve(const LinkId requested_link_id, const DeviceId destination,
                      const ChunkSize chunk_size) noexcept {
-    const auto link_id = requested_link_id == AutomaticLink
-                             ? unique_link_to(destination)
-                             : requested_link_id;
+    const auto link_id = resolve_link(requested_link_id, destination);
     assert(link_connects(link_id, destination));
     links.at(link_id).link->reserve(chunk_size);
 }

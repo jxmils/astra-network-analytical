@@ -535,6 +535,65 @@ TEST_F(TestNetworkAnalyticalCongestionAware, SixPortBaselinesUseExactEndpointPor
     EXPECT_EQ(selected_planes.size(), MultiPlaneSwitch::Planes);
 }
 
+TEST_F(TestNetworkAnalyticalCongestionAware, TorusHybridAblationsKeepIdenticalHardware) {
+    constexpr auto npus = 64;
+    for (const auto policy : {Hybrid2D::RoutingPolicy::DirectOnly,
+                              Hybrid2D::RoutingPolicy::SwitchOnly,
+                              Hybrid2D::RoutingPolicy::Adaptive}) {
+        auto topology = Hybrid2D(
+            npus, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+            policy, 200.0, 1'000.0, 1.10, "", true);
+        EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh),
+                  4 * npus);
+        EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
+                  4 * npus);
+
+        const auto path = topology.route(0, 1, chunk_size);
+        const auto classes = route_link_classes(path);
+        if (policy == Hybrid2D::RoutingPolicy::SwitchOnly) {
+            EXPECT_EQ(classes, std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+        } else {
+            EXPECT_EQ(classes, std::vector<LinkClass>({LinkClass::BaseMesh}));
+        }
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, RouteAndQueueMetricsAreExact) {
+    auto topology = Hybrid2D(
+        64, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::DirectOnly,
+        200.0, 1'000.0, 1.10, "", true);
+    const auto path = topology.route(0, 1, chunk_size);
+    topology.send(std::make_unique<Chunk>(
+        chunk_size, path, callback, nullptr));
+    topology.send(std::make_unique<Chunk>(
+        chunk_size, path, callback, nullptr));
+
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    const auto routes = topology.get_route_metrics();
+    ASSERT_EQ(routes.size(), 1);
+    EXPECT_EQ(routes.front().route_class, RouteClass::Direct);
+    EXPECT_EQ(routes.front().hops, 1);
+    EXPECT_EQ(routes.front().messages, 2);
+    EXPECT_EQ(routes.front().payload_bytes, 2 * chunk_size);
+    EXPECT_EQ(routes.front().byte_hops, 2 * chunk_size);
+    EXPECT_EQ(routes.front().propagation_time, 2'000);
+
+    const auto serialization_time = routes.front().serialization_time / 2;
+    const auto links = topology.get_link_metrics();
+    const auto used = std::find_if(
+        links.begin(), links.end(), [](const LinkMetrics& metric) {
+            return metric.source == 0 && metric.destination == 1 && metric.bytes > 0;
+        });
+    ASSERT_NE(used, links.end());
+    EXPECT_EQ(used->messages, 2);
+    EXPECT_EQ(used->busy_time, 2 * serialization_time);
+    EXPECT_EQ(used->queue_wait_time, serialization_time);
+}
+
 TEST_F(TestNetworkAnalyticalCongestionAware, SnakeEmbeddingIsAHamiltonianCycle) {
     for (const auto side : {4, 8, 16}) {
         const auto npus = side * side;

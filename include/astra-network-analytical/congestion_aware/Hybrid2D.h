@@ -26,7 +26,14 @@ namespace NetworkAnalyticalCongestionAware {
 class Hybrid2D final : public BasicTopology {
   public:
     enum class ExtraFabric { RowRing, Switch };
-    enum class RoutingPolicy { Static, Adaptive, DirectPreferredAdaptive, OfflineOracle };
+    enum class RoutingPolicy {
+        Static,
+        Adaptive,
+        DirectPreferredAdaptive,
+        OfflineOracle,
+        DirectOnly,
+        SwitchOnly
+    };
 
     Hybrid2D(int npus_count, Bandwidth bandwidth, Latency latency,
              ExtraFabric extra_fabric, RoutingPolicy routing_policy,

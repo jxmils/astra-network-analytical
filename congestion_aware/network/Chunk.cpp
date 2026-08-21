@@ -34,7 +34,8 @@ Chunk::Chunk(const ChunkSize chunk_size, Route route, const Callback callback, c
     : chunk_size(chunk_size),
       route(std::move(route)),
       callback(callback),
-      callback_arg(callback_arg) {
+      callback_arg(callback_arg),
+      link_queued_time(0) {
     assert(chunk_size > 0);
     assert(!this->route.empty());
     assert(callback != nullptr);
@@ -94,6 +95,18 @@ ChunkSize Chunk::get_size() const noexcept {
 
     // return chunk size
     return chunk_size;
+}
+
+const Route& Chunk::get_route() const noexcept {
+    return route;
+}
+
+void Chunk::mark_link_queued(const EventTime time) noexcept {
+    link_queued_time = time;
+}
+
+EventTime Chunk::get_link_queued_time() const noexcept {
+    return link_queued_time;
 }
 
 void Chunk::invoke_callback() noexcept {

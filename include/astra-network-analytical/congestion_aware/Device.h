@@ -59,6 +59,10 @@ class Device {
     [[nodiscard]] Bandwidth get_link_bandwidth(LinkId link_id) const noexcept;
     [[nodiscard]] Latency get_link_latency(LinkId link_id) const noexcept;
 
+    /** Resolve an exact or legacy automatic port for one route hop. */
+    [[nodiscard]] LinkId resolve_link(LinkId link_id,
+                                      DeviceId destination) const noexcept;
+
     /**
      * Initiate a chunk transmission.
      * You must invoke this method on the source device of the chunk.

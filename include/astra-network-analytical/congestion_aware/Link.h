@@ -86,6 +86,7 @@ class Link {
     [[nodiscard]] uint64_t get_transmitted_messages() const noexcept;
     [[nodiscard]] uint64_t get_peak_outstanding_bytes() const noexcept;
     [[nodiscard]] EventTime get_busy_time() const noexcept;
+    [[nodiscard]] EventTime get_queue_wait_time() const noexcept;
 
   private:
     /// event queue Link uses to schedule events
@@ -117,6 +118,7 @@ class Link {
     uint64_t transmitted_bytes;
     uint64_t transmitted_messages;
     EventTime busy_time;
+    EventTime queue_wait_time;
     ChunkSize active_chunk_size;
 
     /**

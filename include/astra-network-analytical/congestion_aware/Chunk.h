@@ -79,6 +79,13 @@ class Chunk {
      */
     [[nodiscard]] ChunkSize get_size() const noexcept;
 
+    /** Return the immutable selected route before transmission starts. */
+    [[nodiscard]] const Route& get_route() const noexcept;
+
+    /** Track when this chunk entered its current physical-link queue. */
+    void mark_link_queued(EventTime time) noexcept;
+    [[nodiscard]] EventTime get_link_queued_time() const noexcept;
+
     /**
      * Invoke the registered callback
      * i.e., this method should be called when the chunk arrives its destination.
@@ -100,6 +107,8 @@ class Chunk {
 
     /// argument of the callback
     CallbackArg callback_arg;
+
+    EventTime link_queued_time;
 };
 
 }  // namespace NetworkAnalyticalCongestionAware

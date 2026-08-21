@@ -9,6 +9,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Chunk.h"
 #include "congestion_aware/Device.h"
 #include <iosfwd>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -103,6 +104,10 @@ class Topology {
     [[nodiscard]] std::vector<LinkMetrics> get_link_metrics() const noexcept;
     void print_link_metrics(std::ostream& output) const;
 
+    /** Retained route selections grouped by route class and physical hops. */
+    [[nodiscard]] std::vector<RouteMetrics> get_route_metrics() const noexcept;
+    void print_route_metrics(std::ostream& output) const;
+
   protected:
     /// number of total devices in the topology
     /// device includes non-NPU devices such as switches
@@ -124,10 +129,14 @@ class Topology {
     /// bandwidth per each network dimension
     std::vector<Bandwidth> bandwidth_per_dim;
 
+    std::map<std::pair<RouteClass, int>, RouteMetrics> route_metrics;
+
     /**
      * Instantiate Device objects in the topology.
      */
     void instantiate_devices() noexcept;
+
+    void record_route(const Route& route, ChunkSize chunk_size) noexcept;
 
     /**
      * Connect src -> dest with the given bandwidth and latency.

@@ -179,6 +179,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::TorusSwitchAdaptive;
     }
 
+    if (topology_name == "TorusSwitchDirectOnly") {
+        return TopologyBuildingBlock::TorusSwitchDirectOnly;
+    }
+
+    if (topology_name == "TorusSwitchSwitchOnly") {
+        return TopologyBuildingBlock::TorusSwitchSwitchOnly;
+    }
+
     if (topology_name == "MultiSwitch6Adaptive") {
         return TopologyBuildingBlock::MultiSwitch6Adaptive;
     }
