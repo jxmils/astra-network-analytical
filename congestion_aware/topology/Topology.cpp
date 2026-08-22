@@ -31,6 +31,12 @@ Route Topology::route(const DeviceId src, const DeviceId dest,
     return route(src, dest);
 }
 
+Route Topology::route(const DeviceId src, const DeviceId dest,
+                      const ChunkSize chunk_size, const int stream) const noexcept {
+    static_cast<void>(stream);
+    return route(src, dest, chunk_size);
+}
+
 int Topology::get_devices_count() const noexcept {
     assert(devices_count > 0);
     assert(npus_count > 0);

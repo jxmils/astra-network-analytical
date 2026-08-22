@@ -56,6 +56,11 @@ class Topology {
     [[nodiscard]] virtual Route route(DeviceId src, DeviceId dest,
                                       ChunkSize chunk_size) const noexcept;
 
+    /** Request-aware selection for planned routes; fixed topologies ignore stream. */
+    [[nodiscard]] virtual Route route(DeviceId src, DeviceId dest,
+                                      ChunkSize chunk_size,
+                                      int stream) const noexcept;
+
     /**
      * Initiate a transmission of a chunk.
      *

@@ -25,6 +25,8 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
                               ChunkSize chunk_size) const noexcept override;
+    [[nodiscard]] Route route(DeviceId src, DeviceId dest, ChunkSize chunk_size,
+                              int stream) const noexcept override;
     void send(std::unique_ptr<Chunk> chunk) noexcept override;
     [[nodiscard]] std::vector<LinkMetrics> get_link_metrics() const noexcept override;
     void print_link_metrics(std::ostream& output) const override;
@@ -39,7 +41,7 @@ class OcsSwitch final : public BasicTopology {
 
   private:
     using Pair = std::pair<DeviceId, DeviceId>;
-    using AssignmentKey = std::tuple<DeviceId, DeviceId, ChunkSize>;
+    using AssignmentKey = std::tuple<DeviceId, DeviceId, ChunkSize, int>;
 
     struct Circuit {
         Pair pair;

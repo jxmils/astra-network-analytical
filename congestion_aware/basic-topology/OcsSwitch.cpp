@@ -81,7 +81,7 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
     try {
         const auto root = YAML::LoadFile(path);
         if (root["format"].as<std::string>() != "panel-ocs-plan" ||
-            root["version"].as<int>() != 1) {
+            root["version"].as<int>() != 2) {
             reject_ocs("unsupported plan format or version");
         }
         if (root["endpoints"].as<int>() != npus_count) {
@@ -99,13 +99,15 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
             const auto source = assignment["source"].as<int>();
             const auto destination = assignment["destination"].as<int>();
             const auto bytes = assignment["bytes"].as<uint64_t>();
+            const auto stream = assignment["stream"].as<int>();
             const auto route = assignment["route"].as<std::string>();
             if (source < 0 || source >= npus_count || destination < 0 ||
                 destination >= npus_count || source == destination || bytes == 0 ||
-                (route != "DIRECT" && route != "OCS")) {
+                stream < 0 || (route != "DIRECT" && route != "OCS")) {
                 reject_ocs("invalid route assignment");
             }
-            route_assignments[{source, destination, bytes}].push_back(route == "OCS");
+            route_assignments[{source, destination, bytes, stream}].push_back(
+                route == "OCS");
             ++planned_assignments;
         }
         for (const auto& round_node : root["rounds"]) {
@@ -178,17 +180,23 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest) const noexcept {
 
 Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
                        const ChunkSize chunk_size) const noexcept {
+    return route(src, dest, chunk_size, 0);
+}
+
+Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
+                       const ChunkSize chunk_size, const int stream) const noexcept {
     assert(src >= 0 && src < npus_count && dest >= 0 && dest < npus_count);
     assert(chunk_size > 0);
     if (src == dest) {
         return Route({devices[src]});
     }
-    const auto key = AssignmentKey{src, dest, chunk_size};
+    const auto key = AssignmentKey{src, dest, chunk_size, stream};
     const auto found = route_assignments.find(key);
     if (found == route_assignments.end() || found->second.empty()) {
         reject_ocs("plan has no remaining route assignment for " +
                    std::to_string(src) + " -> " + std::to_string(dest) +
-                   " size " + std::to_string(chunk_size));
+                   " size " + std::to_string(chunk_size) + " stream " +
+                   std::to_string(stream));
     }
     const auto use_ocs = found->second.front();
     found->second.pop_front();
