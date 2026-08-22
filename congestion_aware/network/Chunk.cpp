@@ -31,14 +31,24 @@ void Chunk::chunk_arrived_next_device(void* const chunk_ptr) noexcept {
 }
 
 Chunk::Chunk(const ChunkSize chunk_size, Route route, const Callback callback, const CallbackArg callback_arg) noexcept
+    : Chunk(chunk_size, std::move(route), 0, callback, callback_arg) {}
+
+Chunk::Chunk(const ChunkSize chunk_size, Route route, const int stream,
+             const Callback callback, const CallbackArg callback_arg) noexcept
     : chunk_size(chunk_size),
+      stream(stream),
       route(std::move(route)),
       callback(callback),
       callback_arg(callback_arg),
       link_queued_time(0) {
     assert(chunk_size > 0);
+    assert(stream >= 0);
     assert(!this->route.empty());
     assert(callback != nullptr);
+}
+
+int Chunk::get_stream() const noexcept {
+    return stream;
 }
 
 std::shared_ptr<Device> Chunk::current_device() const noexcept {

@@ -42,6 +42,7 @@ class OcsSwitch final : public BasicTopology {
   private:
     using Pair = std::pair<DeviceId, DeviceId>;
     using AssignmentKey = std::tuple<DeviceId, DeviceId, ChunkSize, int>;
+    using PendingKey = std::tuple<DeviceId, DeviceId, int>;
 
     struct Circuit {
         Pair pair;
@@ -52,6 +53,7 @@ class OcsSwitch final : public BasicTopology {
 
     struct Configuration {
         int plane;
+        int stream;
         std::vector<Circuit> circuits;
     };
 
@@ -80,7 +82,7 @@ class OcsSwitch final : public BasicTopology {
     std::vector<std::vector<LinkId>> to_switch_ports;
     std::vector<std::vector<LinkId>> from_switch_ports;
     std::map<Pair, LinkId> base_ports;
-    std::map<Pair, std::deque<std::unique_ptr<Chunk>>> pending;
+    std::map<PendingKey, std::deque<std::unique_ptr<Chunk>>> pending;
     mutable std::map<AssignmentKey, std::deque<bool>> route_assignments;
     std::map<std::pair<DeviceId, LinkId>, LinkMetrics> physical_metrics;
     int current_round;

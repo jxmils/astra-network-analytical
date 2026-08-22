@@ -81,7 +81,7 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
     try {
         const auto root = YAML::LoadFile(path);
         if (root["format"].as<std::string>() != "panel-ocs-plan" ||
-            root["version"].as<int>() != 2) {
+            root["version"].as<int>() != 3) {
             reject_ocs("unsupported plan format or version");
         }
         if (root["endpoints"].as<int>() != npus_count) {
@@ -114,7 +114,8 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
             auto circuit_round = Round{round_node["index"].as<int>(), {}};
             for (const auto& configuration_node : round_node["configurations"]) {
                 auto configuration = Configuration{
-                    configuration_node["plane"].as<int>(), {}};
+                    configuration_node["plane"].as<int>(),
+                    configuration_node["stream"].as<int>(), {}};
                 for (const auto& circuit_node : configuration_node["circuits"]) {
                     const auto source = circuit_node["source"].as<int>();
                     const auto destination = circuit_node["destination"].as<int>();
@@ -156,6 +157,7 @@ void OcsSwitch::validate_plan() const noexcept {
         auto used_planes = std::set<int>();
         for (const auto& configuration : circuit_round.configurations) {
             if (configuration.plane < 0 || configuration.plane >= planes ||
+                configuration.stream < 0 ||
                 !used_planes.insert(configuration.plane).second) {
                 reject_ocs("invalid or repeated plane in a round");
             }
@@ -230,7 +232,8 @@ void OcsSwitch::send(std::unique_ptr<Chunk> chunk) noexcept {
     record_route(path, chunk->get_size());
     const auto pair = Pair{path.front().device->get_id(), path.back().device->get_id()};
     chunk->mark_link_queued(event_queue->get_current_time());
-    pending[pair].push_back(std::move(chunk));
+    pending[{pair.first, pair.second, chunk->get_stream()}].push_back(
+        std::move(chunk));
     if (current_round == 0 && completed_rounds == 0 && initial_reconfiguration &&
         !reconfiguring) {
         start_initial_round();
@@ -279,7 +282,8 @@ void OcsSwitch::try_start_transmissions() noexcept {
         progress = false;
         for (auto& configuration : rounds[current_round].configurations) {
             for (auto& circuit : configuration.circuits) {
-                auto found = pending.find(circuit.pair);
+                auto found = pending.find({circuit.pair.first, circuit.pair.second,
+                                           configuration.stream});
                 if (circuit.busy || circuit.remaining == 0 || found == pending.end() ||
                     found->second.empty()) {
                     continue;

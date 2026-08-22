@@ -37,6 +37,8 @@ class Chunk {
      * @param callback_arg: argument of the callback
      */
     Chunk(ChunkSize chunk_size, Route route, Callback callback, CallbackArg callback_arg) noexcept;
+    Chunk(ChunkSize chunk_size, Route route, int stream, Callback callback,
+          CallbackArg callback_arg) noexcept;
 
     /**
      * Get the current sitting device of the chunk
@@ -78,6 +80,7 @@ class Chunk {
      * @return size of the chunk
      */
     [[nodiscard]] ChunkSize get_size() const noexcept;
+    [[nodiscard]] int get_stream() const noexcept;
 
     /** Return the immutable selected route before transmission starts. */
     [[nodiscard]] const Route& get_route() const noexcept;
@@ -95,6 +98,7 @@ class Chunk {
   private:
     /// size of the chunk
     ChunkSize chunk_size;
+    int stream;
 
     /// route of the chunk to its destination.
     /// Route has the structure of [current device, next device, ..., dest device]
