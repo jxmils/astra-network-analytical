@@ -186,7 +186,9 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
     const auto key = AssignmentKey{src, dest, chunk_size};
     const auto found = route_assignments.find(key);
     if (found == route_assignments.end() || found->second.empty()) {
-        reject_ocs("plan has no remaining route assignment for request");
+        reject_ocs("plan has no remaining route assignment for " +
+                   std::to_string(src) + " -> " + std::to_string(dest) +
+                   " size " + std::to_string(chunk_size));
     }
     const auto use_ocs = found->second.front();
     found->second.pop_front();
