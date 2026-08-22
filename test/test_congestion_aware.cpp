@@ -13,6 +13,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
+#include "congestion_aware/OcsSwitch.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdio>
@@ -93,7 +94,119 @@ void record_arrival(void* const arg) {
     observation->arrival_time = observation->event_queue->get_current_time();
 }
 
+std::string write_ocs_test_plan(const std::string& name,
+                                const bool initial_reconfiguration = false) {
+    const auto path = "/tmp/" + name + ".json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan",
+  "version": 1,
+  "endpoints": 16,
+  "planes": 6,
+  "link_bandwidth_GBps": 1.0,
+  "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0,
+  "initial_reconfiguration": )" << (initial_reconfiguration ? "true" : "false") << R"(,
+  "rounds": [
+    {"index": 0, "configurations": [
+      {"plane": 0, "circuits": [{"source": 0, "destination": 1, "bytes": 100}]},
+      {"plane": 1, "circuits": [{"source": 2, "destination": 3, "bytes": 100}]}
+    ]},
+    {"index": 1, "configurations": [
+      {"plane": 0, "circuits": [{"source": 0, "destination": 2, "bytes": 100}]}
+    ]}
+  ]
+})";
+    output.close();
+    return path;
+}
+
+std::string write_hybrid_ocs_test_plan() {
+    const auto path = "/tmp/analytical-torus-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 1, "endpoints": 16, "planes": 2,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "rounds": [{"index": 0, "configurations": [
+    {"plane": 0, "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
+  ]}]
+})";
+    output.close();
+    return path;
+}
+
 }  // namespace
+
+TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfiguration) {
+    const auto plan = write_ocs_test_plan("analytical-ocs-rounds");
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan);
+    auto first = ArrivalObservation{event_queue};
+    auto parallel = ArrivalObservation{event_queue};
+    auto second_round = ArrivalObservation{event_queue};
+
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 1, 100), record_arrival, &first));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(2, 3, 100), record_arrival, &parallel));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 2, 100), record_arrival, &second_round));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(first.arrival_time, parallel.arrival_time);
+    EXPECT_EQ(first.arrival_time, 104);
+    EXPECT_EQ(second_round.arrival_time, 205);
+    EXPECT_EQ(topology.get_completed_rounds(), 2);
+    EXPECT_EQ(topology.get_reconfiguration_count(), 1);
+    EXPECT_EQ(topology.get_reconfiguration_time(), 7);
+    EXPECT_EQ(topology.get_scheduled_bytes(), 300);
+    EXPECT_EQ(topology.get_transmitted_bytes(), 300);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchChargesOptionalInitialConfiguration) {
+    const auto plan = write_ocs_test_plan("analytical-ocs-initial", true);
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan);
+    auto observation = ArrivalObservation{event_queue};
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 1, 100), record_arrival, &observation));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(2, 3, 100), callback, nullptr));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 2, 100), callback, nullptr));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(observation.arrival_time, 111);
+    EXPECT_EQ(topology.get_reconfiguration_count(), 2);
+    EXPECT_EQ(topology.get_reconfiguration_time(), 14);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) {
+    const auto plan = write_hybrid_ocs_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 2, true);
+    auto direct = ArrivalObservation{event_queue};
+    auto circuit = ArrivalObservation{event_queue};
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 1, 100), record_arrival, &direct));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 10, 100), record_arrival, &circuit));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(direct.arrival_time, 98);
+    EXPECT_EQ(circuit.arrival_time, 104);
+    EXPECT_EQ(topology.get_scheduled_bytes(), 100);
+    EXPECT_EQ(topology.get_transmitted_bytes(), 100);
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 64);
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink), 64);
+    std::remove(plan.c_str());
+}
 
 TEST_F(TestNetworkAnalyticalCongestionAware, HybridTopologiesHaveExactPhysicalPorts) {
     constexpr auto side = 4;

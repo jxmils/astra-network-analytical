@@ -81,6 +81,10 @@ const std::string& NetworkParser::get_routing_plan_path() const noexcept {
     return routing_plan_path;
 }
 
+const std::string& NetworkParser::get_ocs_plan_path() const noexcept {
+    return ocs_plan_path;
+}
+
 std::vector<TopologyBuildingBlock> NetworkParser::get_topologies_per_dim() const noexcept {
     assert(dims_count > 0);
     assert(topology_per_dim.size() == dims_count);
@@ -118,6 +122,9 @@ void NetworkParser::parse_network_config_yml(const YAML::Node& network_config) n
     routing_plan_path = network_config["routing_plan"]
                             ? network_config["routing_plan"].as<std::string>()
                             : "";
+    ocs_plan_path = network_config["ocs_plan"]
+                        ? network_config["ocs_plan"].as<std::string>()
+                        : "";
 
     // check the validity of the parsed network config
     check_validity();
@@ -216,6 +223,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
 
     if (topology_name == "MultiSwitch6Adaptive") {
         return TopologyBuildingBlock::MultiSwitch6Adaptive;
+    }
+
+    if (topology_name == "OcsSwitch6") {
+        return TopologyBuildingBlock::OcsSwitch6;
+    }
+
+    if (topology_name == "TorusOcsStatic2D") {
+        return TopologyBuildingBlock::TorusOcsStatic2D;
     }
 
     if (topology_name == "HierarchicalCluster") {

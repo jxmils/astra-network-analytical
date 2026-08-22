@@ -58,6 +58,7 @@ class NetworkParser {
     [[nodiscard]] double get_direct_preference_factor() const noexcept;
     [[nodiscard]] int get_nic_count() const noexcept;
     [[nodiscard]] const std::string& get_routing_plan_path() const noexcept;
+    [[nodiscard]] const std::string& get_ocs_plan_path() const noexcept;
 
     /**
      * Read "topology" value and translate it into TopologyBuildingBlock
@@ -85,6 +86,7 @@ class NetworkParser {
     double direct_preference_factor;
     int nic_count;
     std::string routing_plan_path;
+    std::string ocs_plan_path;
 
     /// topology building block per each dimension
     std::vector<TopologyBuildingBlock> topology_per_dim;

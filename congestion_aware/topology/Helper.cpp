@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
+#include "congestion_aware/OcsSwitch.h"
 #include "congestion_aware/Ring.h"
 #include "congestion_aware/Switch.h"
 #include <cstdlib>
@@ -31,6 +32,7 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto direct_preference_factor = network_parser.get_direct_preference_factor();
     const auto nic_count = network_parser.get_nic_count();
     const auto& routing_plan_path = network_parser.get_routing_plan_path();
+    const auto& ocs_plan_path = network_parser.get_ocs_plan_path();
 
     // for now, congestion_aware backend supports 1-dim topology only
     if (dims_count != 1) {
@@ -131,6 +133,12 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             direct_preference_factor, "", true, Hybrid2D::LogicalShape::Grid);
     case TopologyBuildingBlock::MultiSwitch6Adaptive:
         return std::make_shared<MultiPlaneSwitch>(npus_count, bandwidth, latency);
+    case TopologyBuildingBlock::OcsSwitch6:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path);
+    case TopologyBuildingBlock::TorusOcsStatic2D:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path, 2, true);
     case TopologyBuildingBlock::HierarchicalCluster:
         return std::make_shared<HierarchicalCluster>(
             npus_count, bandwidth, latency, extra_bandwidth, extra_latency,

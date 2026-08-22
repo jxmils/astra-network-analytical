@@ -11,10 +11,13 @@ LICENSE file in the root directory of this source tree.
 
 using namespace NetworkAnalyticalCongestionAware;
 
+std::shared_ptr<EventQueue> Topology::event_queue;
+
 void Topology::set_event_queue(std::shared_ptr<EventQueue> event_queue) noexcept {
     assert(event_queue != nullptr);
 
     // pass the given event_queue to Link
+    Topology::event_queue = event_queue;
     Link::set_event_queue(std::move(event_queue));
 }
 

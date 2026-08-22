@@ -61,7 +61,7 @@ class Topology {
      *
      * @param chunk chunk to be transmitted
      */
-    void send(std::unique_ptr<Chunk> chunk) noexcept;
+    virtual void send(std::unique_ptr<Chunk> chunk) noexcept;
 
     /**
      * Get the number of NPUs in the topology.
@@ -101,8 +101,8 @@ class Topology {
     [[nodiscard]] std::vector<Bandwidth> get_bandwidth_per_dim() const noexcept;
 
     /** Retained per-port counters for audit and utilization reporting. */
-    [[nodiscard]] std::vector<LinkMetrics> get_link_metrics() const noexcept;
-    void print_link_metrics(std::ostream& output) const;
+    [[nodiscard]] virtual std::vector<LinkMetrics> get_link_metrics() const noexcept;
+    virtual void print_link_metrics(std::ostream& output) const;
 
     /** Retained route selections grouped by route class and physical hops. */
     [[nodiscard]] std::vector<RouteMetrics> get_route_metrics() const noexcept;
@@ -130,6 +130,9 @@ class Topology {
     std::vector<Bandwidth> bandwidth_per_dim;
 
     std::map<std::pair<RouteClass, int>, RouteMetrics> route_metrics;
+
+    /// Shared simulator queue used by links and topology-level fabrics.
+    static std::shared_ptr<EventQueue> event_queue;
 
     /**
      * Instantiate Device objects in the topology.

@@ -57,6 +57,8 @@ enum class TopologyBuildingBlock {
     TorusSwitchAdaptive,
     TorusSwitchAdaptive2D,
     MultiSwitch6Adaptive,
+    OcsSwitch6,
+    TorusOcsStatic2D,
     HierarchicalCluster
 };
 
