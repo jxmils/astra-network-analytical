@@ -29,6 +29,7 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto extra_bandwidths_per_dim = network_parser.get_extra_bandwidths_per_dim();
     const auto extra_latencies_per_dim = network_parser.get_extra_latencies_per_dim();
     const auto direct_preference_factor = network_parser.get_direct_preference_factor();
+    const auto nic_count = network_parser.get_nic_count();
     const auto& routing_plan_path = network_parser.get_routing_plan_path();
 
     // for now, congestion_aware backend supports 1-dim topology only
@@ -58,6 +59,10 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
         return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, false);
     case TopologyBuildingBlock::Torus3D:
         return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, true);
+    case TopologyBuildingBlock::Mesh3D3D:
+        return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, false, true);
+    case TopologyBuildingBlock::Torus3D3D:
+        return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, true, true);
     case TopologyBuildingBlock::Mesh2DSnake:
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, false, Mesh2D::Embedding::Snake);
     case TopologyBuildingBlock::Torus2DSnake:
@@ -114,11 +119,22 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
             Hybrid2D::RoutingPolicy::SwitchOnly, extra_bandwidth, extra_latency,
             direct_preference_factor, "", true);
+    case TopologyBuildingBlock::TorusSwitchDirectOnly2D:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::DirectOnly, extra_bandwidth, extra_latency,
+            direct_preference_factor, "", true, Hybrid2D::LogicalShape::Grid);
+    case TopologyBuildingBlock::TorusSwitchSwitchOnly2D:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::SwitchOnly, extra_bandwidth, extra_latency,
+            direct_preference_factor, "", true, Hybrid2D::LogicalShape::Grid);
     case TopologyBuildingBlock::MultiSwitch6Adaptive:
         return std::make_shared<MultiPlaneSwitch>(npus_count, bandwidth, latency);
     case TopologyBuildingBlock::HierarchicalCluster:
         return std::make_shared<HierarchicalCluster>(
-            npus_count, bandwidth, latency, extra_bandwidth, extra_latency);
+            npus_count, bandwidth, latency, extra_bandwidth, extra_latency,
+            nic_count);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:

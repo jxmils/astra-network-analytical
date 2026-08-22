@@ -89,9 +89,15 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                                   : TopologyBuildingBlock::MeshRowRing;
     } else if (base_wraparound) {
         if (routing_policy == RoutingPolicy::DirectOnly) {
-            basic_topology_type = TopologyBuildingBlock::TorusSwitchDirectOnly;
+            basic_topology_type =
+                logical_shape == LogicalShape::Grid
+                    ? TopologyBuildingBlock::TorusSwitchDirectOnly2D
+                    : TopologyBuildingBlock::TorusSwitchDirectOnly;
         } else if (routing_policy == RoutingPolicy::SwitchOnly) {
-            basic_topology_type = TopologyBuildingBlock::TorusSwitchSwitchOnly;
+            basic_topology_type =
+                logical_shape == LogicalShape::Grid
+                    ? TopologyBuildingBlock::TorusSwitchSwitchOnly2D
+                    : TopologyBuildingBlock::TorusSwitchSwitchOnly;
         } else {
             basic_topology_type =
                 logical_shape == LogicalShape::Grid

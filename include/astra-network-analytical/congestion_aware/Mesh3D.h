@@ -15,7 +15,7 @@ namespace NetworkAnalyticalCongestionAware {
 class Mesh3D final : public BasicTopology {
   public:
     Mesh3D(int npus_count, Bandwidth bandwidth, Latency latency,
-           bool wraparound) noexcept;
+           bool wraparound, bool topology_aware = false) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
 

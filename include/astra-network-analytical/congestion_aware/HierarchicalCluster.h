@@ -16,8 +16,9 @@ namespace NetworkAnalyticalCongestionAware {
 /**
  * Two-level 8-NPU-node cluster with a nonblocking local fabric and Clos core.
  *
- * The supplied extra bandwidth is effective scale-out bandwidth per NPU. Each
- * node gateway and Clos port therefore receives NodeSize times that bandwidth.
+ * Every node has an explicit pool of equal-bandwidth NIC devices. GPU local
+ * rank deterministically selects a NIC, distributing the eight participants
+ * over all provisioned NICs without creating an aggregate pseudo-link.
  */
 class HierarchicalCluster final : public BasicTopology {
   public:
@@ -25,18 +26,21 @@ class HierarchicalCluster final : public BasicTopology {
 
     HierarchicalCluster(int npus_count, Bandwidth scale_up_bandwidth,
                         Latency scale_up_latency,
-                        Bandwidth scale_out_bandwidth_per_npu,
-                        Latency scale_out_latency) noexcept;
+                        Bandwidth bandwidth_per_nic,
+                        Latency scale_out_latency,
+                        int nic_count = 1) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
 
     [[nodiscard]] int get_nodes_count() const noexcept;
-    [[nodiscard]] Bandwidth get_scale_out_bandwidth_per_npu() const noexcept;
+    [[nodiscard]] int get_nic_count() const noexcept;
+    [[nodiscard]] Bandwidth get_bandwidth_per_nic() const noexcept;
     [[nodiscard]] Bandwidth get_scale_out_bandwidth_per_node() const noexcept;
 
   private:
     int nodes_count;
-    Bandwidth scale_out_bandwidth_per_npu;
+    int nic_count_per_node;
+    Bandwidth bandwidth_per_nic;
     Bandwidth scale_out_bandwidth_per_node;
     Latency scale_out_latency;
     DeviceId local_switch_base;
@@ -46,7 +50,7 @@ class HierarchicalCluster final : public BasicTopology {
 
     [[nodiscard]] int node_of(DeviceId npu) const noexcept;
     [[nodiscard]] DeviceId local_switch(int node) const noexcept;
-    [[nodiscard]] DeviceId nic(int node) const noexcept;
+    [[nodiscard]] DeviceId nic(int node, int index) const noexcept;
     void remember_bidirectional_port(
         DeviceId first, DeviceId second,
         const std::pair<LinkId, LinkId>& connected_ports) noexcept;

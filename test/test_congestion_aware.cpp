@@ -500,6 +500,31 @@ TEST_F(TestNetworkAnalyticalCongestionAware, ThreeDimensionalRoutesAreMinimal) {
     }
 }
 
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       GroupedThreeDimensionalFabricsChangeOnlyLogicalDimensions) {
+    constexpr auto npus = 64;
+    for (const auto wraparound : {false, true}) {
+        const auto flat = Mesh3D(npus, 200.0, 1'000.0, wraparound);
+        const auto grouped = Mesh3D(npus, 200.0, 1'000.0, wraparound, true);
+        EXPECT_EQ(flat.get_npus_count_per_dim(), std::vector<int>({npus}));
+        EXPECT_EQ(grouped.get_npus_count_per_dim(),
+                  std::vector<int>({4, 4, 4}));
+        EXPECT_EQ(grouped.get_bandwidth_per_dim(),
+                  std::vector<Bandwidth>({200.0, 200.0, 200.0}));
+        const auto flat_links = flat.get_link_metrics();
+        const auto grouped_links = grouped.get_link_metrics();
+        ASSERT_EQ(flat_links.size(), grouped_links.size());
+        for (std::size_t index = 0; index < flat_links.size(); ++index) {
+            EXPECT_EQ(flat_links[index].source, grouped_links[index].source);
+            EXPECT_EQ(flat_links[index].destination,
+                      grouped_links[index].destination);
+            EXPECT_EQ(flat_links[index].port, grouped_links[index].port);
+            EXPECT_EQ(flat_links[index].link_class,
+                      grouped_links[index].link_class);
+        }
+    }
+}
+
 TEST_F(TestNetworkAnalyticalCongestionAware, SixPortBaselinesUseExactEndpointPorts) {
     constexpr auto npus = 64;
     const auto hybrid = Hybrid2D(
@@ -540,24 +565,77 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
        HierarchicalClusterHasExactResourcesAndLogicalDimensions) {
     constexpr auto npus = 64;
     const auto topology = HierarchicalCluster(
-        npus, 200.0, 1'000.0, 25.0, 1'000.0);
+        npus, 900.0, 1'000.0, 100.0, 1'000.0, 4);
     const auto metrics = topology.get_link_metrics();
 
     EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({8, 8}));
     EXPECT_EQ(topology.get_bandwidth_per_dim(),
-              std::vector<Bandwidth>({200.0, 25.0}));
+              std::vector<Bandwidth>({900.0, 50.0}));
     EXPECT_EQ(topology.get_nodes_count(), 8);
-    EXPECT_DOUBLE_EQ(topology.get_scale_out_bandwidth_per_node(), 200.0);
+    EXPECT_EQ(topology.get_nic_count(), 4);
+    EXPECT_DOUBLE_EQ(topology.get_bandwidth_per_nic(), 100.0);
+    EXPECT_DOUBLE_EQ(topology.get_scale_out_bandwidth_per_node(), 400.0);
     EXPECT_EQ(count_links(metrics, LinkClass::ScaleUp), 2 * npus);
-    EXPECT_EQ(count_links(metrics, LinkClass::Gateway), 2 * 8);
-    EXPECT_EQ(count_links(metrics, LinkClass::ScaleOut), 2 * 8);
-    EXPECT_EQ(metrics.size(), 160);
+    EXPECT_EQ(count_links(metrics, LinkClass::Gateway), 2 * 8 * 4);
+    EXPECT_EQ(count_links(metrics, LinkClass::ScaleOut), 2 * 8 * 4);
+    EXPECT_EQ(metrics.size(), 256);
 
     for (auto npu = 0; npu < npus; ++npu) {
         EXPECT_EQ(topology.route(npu, npu).front()
                       ->get_connected_device_ids().size(),
                   1);
     }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       HierarchicalClusterUsesEveryProvisionedNic) {
+    constexpr auto nic_count = 4;
+    const auto topology = HierarchicalCluster(
+        64, 900.0, 1'000.0, 100.0, 1'000.0, nic_count);
+    auto source_nics = std::set<DeviceId>();
+    auto destination_nics = std::set<DeviceId>();
+    for (auto local_rank = 0; local_rank < 8; ++local_rank) {
+        const auto ids = route_ids(topology.route(local_rank, 8 + local_rank));
+        ASSERT_EQ(ids.size(), 7);
+        source_nics.insert(ids[2]);
+        destination_nics.insert(ids[4]);
+    }
+    EXPECT_EQ(source_nics.size(), nic_count);
+    EXPECT_EQ(destination_nics.size(), nic_count);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       HierarchicalClusterStripesSyntheticBoundaryTraffic) {
+    constexpr auto nic_count = 4;
+    auto topology = HierarchicalCluster(
+        64, 900.0, 1'000.0, 100.0, 1'000.0, nic_count);
+    for (auto local_rank = 0; local_rank < 8; ++local_rank) {
+        topology.send(std::make_unique<Chunk>(
+            chunk_size, topology.route(local_rank, 8 + local_rank),
+            callback, nullptr));
+    }
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    const auto metrics = topology.get_link_metrics();
+    auto gateway_bytes = ChunkSize{0};
+    auto scale_out_bytes = ChunkSize{0};
+    auto max_gateway_bytes = ChunkSize{0};
+    auto max_scale_out_bytes = ChunkSize{0};
+    for (const auto& metric : metrics) {
+        if (metric.link_class == LinkClass::Gateway) {
+            gateway_bytes += metric.bytes;
+            max_gateway_bytes = std::max(max_gateway_bytes, metric.bytes);
+        } else if (metric.link_class == LinkClass::ScaleOut) {
+            scale_out_bytes += metric.bytes;
+            max_scale_out_bytes = std::max(max_scale_out_bytes, metric.bytes);
+        }
+    }
+    EXPECT_EQ(gateway_bytes, 16 * chunk_size);
+    EXPECT_EQ(scale_out_bytes, 16 * chunk_size);
+    EXPECT_EQ(max_gateway_bytes, 2 * chunk_size);
+    EXPECT_EQ(max_scale_out_bytes, 2 * chunk_size);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware,

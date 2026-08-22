@@ -22,7 +22,8 @@ namespace {
 }  // namespace
 
 Mesh3D::Mesh3D(const int npus_count, const Bandwidth bandwidth,
-               const Latency latency, const bool wraparound) noexcept
+               const Latency latency, const bool wraparound,
+               const bool topology_aware) noexcept
     : BasicTopology(npus_count, npus_count, bandwidth, latency),
       extent(static_cast<int>(std::lround(std::cbrt(
           static_cast<double>(npus_count))))),
@@ -35,8 +36,16 @@ Mesh3D::Mesh3D(const int npus_count, const Bandwidth bandwidth,
             "Torus3D requires extent greater than two for distinct neighbors");
     }
 
-    basic_topology_type = wraparound ? TopologyBuildingBlock::Torus3D
-                                     : TopologyBuildingBlock::Mesh3D;
+    if (topology_aware) {
+        basic_topology_type = wraparound ? TopologyBuildingBlock::Torus3D3D
+                                         : TopologyBuildingBlock::Mesh3D3D;
+        dims_count = 3;
+        npus_count_per_dim = {extent, extent, extent};
+        bandwidth_per_dim = {bandwidth, bandwidth, bandwidth};
+    } else {
+        basic_topology_type = wraparound ? TopologyBuildingBlock::Torus3D
+                                         : TopologyBuildingBlock::Mesh3D;
+    }
 
     for (auto z = 0; z < extent; ++z) {
         for (auto y = 0; y < extent; ++y) {

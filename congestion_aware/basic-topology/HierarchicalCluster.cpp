@@ -24,29 +24,34 @@ namespace {
 HierarchicalCluster::HierarchicalCluster(
     const int npus_count, const Bandwidth scale_up_bandwidth,
     const Latency scale_up_latency,
-    const Bandwidth scale_out_bandwidth_per_npu,
-    const Latency scale_out_latency) noexcept
+    const Bandwidth bandwidth_per_nic,
+    const Latency scale_out_latency,
+    const int nic_count) noexcept
     : BasicTopology(npus_count,
-                    npus_count + 2 * (npus_count / NodeSize) + 1,
+                    npus_count + (npus_count / NodeSize) * (1 + nic_count) + 1,
                     scale_up_bandwidth, scale_up_latency),
       nodes_count(npus_count / NodeSize),
-      scale_out_bandwidth_per_npu(scale_out_bandwidth_per_npu),
-      scale_out_bandwidth_per_node(NodeSize * scale_out_bandwidth_per_npu),
+      nic_count_per_node(nic_count),
+      bandwidth_per_nic(bandwidth_per_nic),
+      scale_out_bandwidth_per_node(nic_count * bandwidth_per_nic),
       scale_out_latency(scale_out_latency),
       local_switch_base(npus_count),
       nic_base(npus_count + nodes_count),
-      clos_id(npus_count + 2 * nodes_count) {
+      clos_id(npus_count + nodes_count + nodes_count * nic_count) {
     if (npus_count <= NodeSize || npus_count % NodeSize != 0) {
         reject_hierarchy("hierarchical cluster requires a multiple of eight NPUs");
     }
-    if (scale_out_bandwidth_per_npu <= 0 || scale_out_latency < 0) {
+    if (bandwidth_per_nic <= 0 || scale_out_latency < 0 ||
+        nic_count <= 0 || nic_count > NodeSize) {
         reject_hierarchy("hierarchical cluster requires positive scale-out bandwidth");
     }
 
     basic_topology_type = TopologyBuildingBlock::HierarchicalCluster;
     dims_count = 2;
     npus_count_per_dim = {NodeSize, nodes_count};
-    bandwidth_per_dim = {scale_up_bandwidth, scale_out_bandwidth_per_npu};
+    bandwidth_per_dim = {
+        scale_up_bandwidth,
+        scale_out_bandwidth_per_node / static_cast<Bandwidth>(NodeSize)};
 
     for (auto npu = 0; npu < npus_count; ++npu) {
         const auto local = local_switch(node_of(npu));
@@ -57,15 +62,17 @@ HierarchicalCluster::HierarchicalCluster(
     }
     for (auto node = 0; node < nodes_count; ++node) {
         const auto local = local_switch(node);
-        const auto gateway = nic(node);
-        remember_bidirectional_port(
-            local, gateway,
-            connect(local, gateway, scale_out_bandwidth_per_node,
-                    scale_out_latency, true, LinkClass::Gateway));
-        remember_bidirectional_port(
-            gateway, clos_id,
-            connect(gateway, clos_id, scale_out_bandwidth_per_node,
-                    scale_out_latency, true, LinkClass::ScaleOut));
+        for (auto index = 0; index < nic_count_per_node; ++index) {
+            const auto gateway = nic(node, index);
+            remember_bidirectional_port(
+                local, gateway,
+                connect(local, gateway, bandwidth_per_nic,
+                        scale_out_latency, true, LinkClass::Gateway));
+            remember_bidirectional_port(
+                gateway, clos_id,
+                connect(gateway, clos_id, bandwidth_per_nic,
+                        scale_out_latency, true, LinkClass::ScaleOut));
+        }
     }
 }
 
@@ -79,9 +86,10 @@ DeviceId HierarchicalCluster::local_switch(const int node) const noexcept {
     return local_switch_base + node;
 }
 
-DeviceId HierarchicalCluster::nic(const int node) const noexcept {
+DeviceId HierarchicalCluster::nic(const int node, const int index) const noexcept {
     assert(node >= 0 && node < nodes_count);
-    return nic_base + node;
+    assert(index >= 0 && index < nic_count_per_node);
+    return nic_base + node * nic_count_per_node + index;
 }
 
 void HierarchicalCluster::remember_bidirectional_port(
@@ -111,8 +119,9 @@ Route HierarchicalCluster::route(const DeviceId src,
         return path;
     }
 
-    const auto source_nic = nic(source_node);
-    const auto destination_nic = nic(destination_node);
+    const auto source_nic = nic(source_node, (src % NodeSize) % nic_count_per_node);
+    const auto destination_nic = nic(
+        destination_node, (dest % NodeSize) % nic_count_per_node);
     path.emplace_back(devices[source_local], ports.at({source_local, source_nic}));
     path.emplace_back(devices[source_nic], ports.at({source_nic, clos_id}));
     path.emplace_back(devices[clos_id], ports.at({clos_id, destination_nic}));
@@ -127,8 +136,12 @@ int HierarchicalCluster::get_nodes_count() const noexcept {
     return nodes_count;
 }
 
-Bandwidth HierarchicalCluster::get_scale_out_bandwidth_per_npu() const noexcept {
-    return scale_out_bandwidth_per_npu;
+int HierarchicalCluster::get_nic_count() const noexcept {
+    return nic_count_per_node;
+}
+
+Bandwidth HierarchicalCluster::get_bandwidth_per_nic() const noexcept {
+    return bandwidth_per_nic;
 }
 
 Bandwidth HierarchicalCluster::get_scale_out_bandwidth_per_node() const noexcept {

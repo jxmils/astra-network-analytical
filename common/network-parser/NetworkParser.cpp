@@ -10,7 +10,7 @@ LICENSE file in the root directory of this source tree.
 using namespace NetworkAnalytical;
 
 NetworkParser::NetworkParser(const std::string& path) noexcept
-    : dims_count(-1), direct_preference_factor(1.10) {
+    : dims_count(-1), direct_preference_factor(1.10), nic_count(1) {
     // initialize values
     npus_count_per_dim = {};
     bandwidth_per_dim = {};
@@ -73,6 +73,10 @@ double NetworkParser::get_direct_preference_factor() const noexcept {
     return direct_preference_factor;
 }
 
+int NetworkParser::get_nic_count() const noexcept {
+    return nic_count;
+}
+
 const std::string& NetworkParser::get_routing_plan_path() const noexcept {
     return routing_plan_path;
 }
@@ -108,6 +112,9 @@ void NetworkParser::parse_network_config_yml(const YAML::Node& network_config) n
     direct_preference_factor = network_config["direct_preference_factor"]
                                    ? network_config["direct_preference_factor"].as<double>()
                                    : 1.10;
+    nic_count = network_config["nic_count"]
+                    ? network_config["nic_count"].as<int>()
+                    : 1;
     routing_plan_path = network_config["routing_plan"]
                             ? network_config["routing_plan"].as<std::string>()
                             : "";
@@ -151,6 +158,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::Torus3D;
     }
 
+    if (topology_name == "Mesh3D3D") {
+        return TopologyBuildingBlock::Mesh3D3D;
+    }
+
+    if (topology_name == "Torus3D3D") {
+        return TopologyBuildingBlock::Torus3D3D;
+    }
+
     if (topology_name == "MeshRowRing") {
         return TopologyBuildingBlock::MeshRowRing;
     }
@@ -189,6 +204,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
 
     if (topology_name == "TorusSwitchSwitchOnly") {
         return TopologyBuildingBlock::TorusSwitchSwitchOnly;
+    }
+
+    if (topology_name == "TorusSwitchDirectOnly2D") {
+        return TopologyBuildingBlock::TorusSwitchDirectOnly2D;
+    }
+
+    if (topology_name == "TorusSwitchSwitchOnly2D") {
+        return TopologyBuildingBlock::TorusSwitchSwitchOnly2D;
     }
 
     if (topology_name == "MultiSwitch6Adaptive") {
@@ -246,6 +269,12 @@ void NetworkParser::check_validity() const noexcept {
     if (direct_preference_factor < 1.0) {
         std::cerr << "[Error] (network/analytical) direct_preference_factor ("
                   << direct_preference_factor << ") should be at least 1" << std::endl;
+        std::exit(-1);
+    }
+
+    if (nic_count <= 0) {
+        std::cerr << "[Error] (network/analytical) nic_count (" << nic_count
+                  << ") should be positive" << std::endl;
         std::exit(-1);
     }
 
