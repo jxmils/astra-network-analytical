@@ -67,9 +67,11 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
     }
     if (logical_shape == LogicalShape::Grid &&
         (!base_wraparound || extra_fabric != ExtraFabric::Switch ||
-         routing_policy != RoutingPolicy::Adaptive)) {
+         (routing_policy != RoutingPolicy::Adaptive &&
+          routing_policy != RoutingPolicy::DirectOnly &&
+          routing_policy != RoutingPolicy::SwitchOnly))) {
         reject_hybrid_configuration(
-            "grid logical dimensions require the adaptive torus-switch fabric");
+            "grid logical dimensions require a torus-switch fabric");
     }
 
     if (logical_shape == LogicalShape::Grid) {

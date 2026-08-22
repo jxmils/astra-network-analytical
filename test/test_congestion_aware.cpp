@@ -712,6 +712,25 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusHybridAblationsKeepIdenticalHa
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware,
+       GroupedTorusHybridAblationsKeepIdenticalHardware) {
+    constexpr auto npus = 64;
+    for (const auto policy : {Hybrid2D::RoutingPolicy::DirectOnly,
+                              Hybrid2D::RoutingPolicy::SwitchOnly,
+                              Hybrid2D::RoutingPolicy::Adaptive}) {
+        const auto topology = Hybrid2D(
+            npus, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+            policy, 200.0, 1'000.0, 1.10, "", true,
+            Hybrid2D::LogicalShape::Grid);
+        EXPECT_EQ(topology.get_npus_count_per_dim(),
+                  std::vector<int>({8, 8}));
+        EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh),
+                  4 * npus);
+        EXPECT_EQ(count_links(topology.get_link_metrics(),
+                              LinkClass::SwitchUplink), 4 * npus);
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
        GroupedTorusHybridChangesOnlyLogicalDimensions) {
     constexpr auto npus = 64;
     const auto flat = Hybrid2D(
