@@ -137,6 +137,8 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path);
     case TopologyBuildingBlock::TorusOcsStatic2D:
+    case TopologyBuildingBlock::TorusOcsAdaptive2D:
+    case TopologyBuildingBlock::TorusOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true);
     case TopologyBuildingBlock::HierarchicalCluster:

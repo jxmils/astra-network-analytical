@@ -39,6 +39,7 @@ class OcsSwitch final : public BasicTopology {
 
   private:
     using Pair = std::pair<DeviceId, DeviceId>;
+    using AssignmentKey = std::tuple<DeviceId, DeviceId, ChunkSize>;
 
     struct Circuit {
         Pair pair;
@@ -78,6 +79,7 @@ class OcsSwitch final : public BasicTopology {
     std::vector<std::vector<LinkId>> from_switch_ports;
     std::map<Pair, LinkId> base_ports;
     std::map<Pair, std::deque<std::unique_ptr<Chunk>>> pending;
+    mutable std::map<AssignmentKey, std::deque<bool>> route_assignments;
     std::map<std::pair<DeviceId, LinkId>, LinkMetrics> physical_metrics;
     int current_round;
     bool reconfiguring;
@@ -85,6 +87,8 @@ class OcsSwitch final : public BasicTopology {
     int reconfiguration_count;
     uint64_t scheduled_bytes;
     uint64_t transmitted_bytes;
+    uint64_t planned_assignments;
+    mutable uint64_t consumed_assignments;
     EventTime reconfiguration_time;
 
     void load_plan(const std::string& path) noexcept;

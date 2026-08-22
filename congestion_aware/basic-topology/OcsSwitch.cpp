@@ -40,7 +40,8 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       initial_reconfiguration(false), current_round(0), reconfiguring(false),
       completed_rounds(0), reconfiguration_count(0), scheduled_bytes(0),
-      transmitted_bytes(0), reconfiguration_time(0) {
+      transmitted_bytes(0), planned_assignments(0), consumed_assignments(0),
+      reconfiguration_time(0) {
     basic_topology_type = base_torus ? TopologyBuildingBlock::TorusOcsStatic2D
                                      : TopologyBuildingBlock::OcsSwitch6;
     load_plan(plan_path);
@@ -91,6 +92,22 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
         propagation_ns = root["propagation_ns"].as<double>();
         reconfiguration_ns = root["reconfiguration_ns"].as<double>();
         initial_reconfiguration = root["initial_reconfiguration"].as<bool>();
+        if (!root["assignments"] || !root["assignments"].IsSequence()) {
+            reject_ocs("plan has no route assignments");
+        }
+        for (const auto& assignment : root["assignments"]) {
+            const auto source = assignment["source"].as<int>();
+            const auto destination = assignment["destination"].as<int>();
+            const auto bytes = assignment["bytes"].as<uint64_t>();
+            const auto route = assignment["route"].as<std::string>();
+            if (source < 0 || source >= npus_count || destination < 0 ||
+                destination >= npus_count || source == destination || bytes == 0 ||
+                (route != "DIRECT" && route != "OCS")) {
+                reject_ocs("invalid route assignment");
+            }
+            route_assignments[{source, destination, bytes}].push_back(route == "OCS");
+            ++planned_assignments;
+        }
         for (const auto& round_node : root["rounds"]) {
             auto circuit_round = Round{round_node["index"].as<int>(), {}};
             for (const auto& configuration_node : round_node["configurations"]) {
@@ -166,16 +183,19 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
     if (src == dest) {
         return Route({devices[src]});
     }
-    if (base_torus) {
-        auto direct = direct_route(src, dest);
-        const auto hops = static_cast<int>(direct.size()) - 1;
-        const auto direct_cost = hops * latency +
-            static_cast<double>(chunk_size) / bw_GBps_to_Bpns(bandwidth);
-        const auto ocs_cost = propagation_ns +
-            static_cast<double>(chunk_size) / bw_GBps_to_Bpns(plan_bandwidth);
-        if (direct_cost <= ocs_cost) {
-            return direct;
+    const auto key = AssignmentKey{src, dest, chunk_size};
+    const auto found = route_assignments.find(key);
+    if (found == route_assignments.end() || found->second.empty()) {
+        reject_ocs("plan has no remaining route assignment for request");
+    }
+    const auto use_ocs = found->second.front();
+    found->second.pop_front();
+    ++consumed_assignments;
+    if (!use_ocs) {
+        if (!base_torus) {
+            reject_ocs("direct assignment requires a persistent base fabric");
         }
+        return direct_route(src, dest);
     }
     auto path = Route();
     path.emplace_back(devices[src], to_switch_ports[0][src]);
@@ -424,7 +444,9 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " reconfigurations=" << reconfiguration_count
            << " reconfiguration_ns=" << reconfiguration_time
            << " scheduled_bytes=" << scheduled_bytes
-           << " transmitted_bytes=" << transmitted_bytes << '\n';
+           << " transmitted_bytes=" << transmitted_bytes
+           << " assignments=" << planned_assignments
+           << " consumed_assignments=" << consumed_assignments << '\n';
 }
 
 void OcsSwitch::build_base_torus() noexcept {

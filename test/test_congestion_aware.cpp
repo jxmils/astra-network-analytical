@@ -107,6 +107,11 @@ std::string write_ocs_test_plan(const std::string& name,
   "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0,
   "initial_reconfiguration": )" << (initial_reconfiguration ? "true" : "false") << R"(,
+  "assignments": [
+    {"source": 0, "destination": 1, "bytes": 100, "route": "OCS"},
+    {"source": 2, "destination": 3, "bytes": 100, "route": "OCS"},
+    {"source": 0, "destination": 2, "bytes": 100, "route": "OCS"}
+  ],
   "rounds": [
     {"index": 0, "configurations": [
       {"plane": 0, "circuits": [{"source": 0, "destination": 1, "bytes": 100}]},
@@ -128,6 +133,10 @@ std::string write_hybrid_ocs_test_plan() {
   "format": "panel-ocs-plan", "version": 1, "endpoints": 16, "planes": 2,
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+    {"source": 0, "destination": 1, "bytes": 100, "route": "DIRECT"},
+    {"source": 0, "destination": 10, "bytes": 100, "route": "OCS"}
+  ],
   "rounds": [{"index": 0, "configurations": [
     {"plane": 0, "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
   ]}]

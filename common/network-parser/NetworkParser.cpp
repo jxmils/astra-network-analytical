@@ -233,6 +233,14 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::TorusOcsStatic2D;
     }
 
+    if (topology_name == "TorusOcsAdaptive2D") {
+        return TopologyBuildingBlock::TorusOcsAdaptive2D;
+    }
+
+    if (topology_name == "TorusOcsDirectPreferred2D") {
+        return TopologyBuildingBlock::TorusOcsDirectPreferred2D;
+    }
+
     if (topology_name == "HierarchicalCluster") {
         return TopologyBuildingBlock::HierarchicalCluster;
     }
