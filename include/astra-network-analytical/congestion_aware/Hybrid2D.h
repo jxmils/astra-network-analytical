@@ -26,6 +26,7 @@ namespace NetworkAnalyticalCongestionAware {
 class Hybrid2D final : public BasicTopology {
   public:
     enum class ExtraFabric { RowRing, Switch };
+    enum class LogicalShape { Flat, Grid };
     enum class RoutingPolicy {
         Static,
         Adaptive,
@@ -41,7 +42,8 @@ class Hybrid2D final : public BasicTopology {
              Latency extra_latency = -1.0,
              double direct_preference_factor = 1.10,
              std::string routing_plan_path = "",
-             bool base_wraparound = false) noexcept;
+             bool base_wraparound = false,
+             LogicalShape logical_shape = LogicalShape::Flat) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
@@ -65,6 +67,7 @@ class Hybrid2D final : public BasicTopology {
     Latency extra_latency;
     double direct_preference_factor;
     bool base_wraparound;
+    LogicalShape logical_shape;
     using OfflineKey = std::tuple<DeviceId, DeviceId, ChunkSize>;
     mutable std::map<OfflineKey, std::deque<int>> offline_routes;
     std::map<std::pair<DeviceId, DeviceId>, LinkId> base_ports;

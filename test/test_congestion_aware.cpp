@@ -633,6 +633,33 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusHybridAblationsKeepIdenticalHa
     }
 }
 
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       GroupedTorusHybridChangesOnlyLogicalDimensions) {
+    constexpr auto npus = 64;
+    const auto flat = Hybrid2D(
+        npus, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::Adaptive, 200.0, 1'000.0, 1.10, "", true);
+    const auto grouped = Hybrid2D(
+        npus, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,
+        Hybrid2D::RoutingPolicy::Adaptive, 200.0, 1'000.0, 1.10, "", true,
+        Hybrid2D::LogicalShape::Grid);
+
+    EXPECT_EQ(flat.get_npus_count_per_dim(), std::vector<int>({npus}));
+    EXPECT_EQ(grouped.get_npus_count_per_dim(), std::vector<int>({8, 8}));
+    EXPECT_EQ(grouped.get_bandwidth_per_dim(),
+              std::vector<Bandwidth>({200.0, 200.0}));
+
+    const auto flat_links = flat.get_link_metrics();
+    const auto grouped_links = grouped.get_link_metrics();
+    ASSERT_EQ(flat_links.size(), grouped_links.size());
+    for (std::size_t index = 0; index < flat_links.size(); ++index) {
+        EXPECT_EQ(flat_links[index].source, grouped_links[index].source);
+        EXPECT_EQ(flat_links[index].destination, grouped_links[index].destination);
+        EXPECT_EQ(flat_links[index].port, grouped_links[index].port);
+        EXPECT_EQ(flat_links[index].link_class, grouped_links[index].link_class);
+    }
+}
+
 TEST_F(TestNetworkAnalyticalCongestionAware, RouteAndQueueMetricsAreExact) {
     auto topology = Hybrid2D(
         64, 200.0, 1'000.0, Hybrid2D::ExtraFabric::Switch,

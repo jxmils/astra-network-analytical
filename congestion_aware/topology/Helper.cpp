@@ -98,6 +98,12 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
             Hybrid2D::RoutingPolicy::Adaptive, extra_bandwidth, extra_latency,
             direct_preference_factor, "", true);
+    case TopologyBuildingBlock::TorusSwitchAdaptive2D:
+        return std::make_shared<Hybrid2D>(
+            npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,
+            Hybrid2D::RoutingPolicy::Adaptive, extra_bandwidth, extra_latency,
+            direct_preference_factor, "", true,
+            Hybrid2D::LogicalShape::Grid);
     case TopologyBuildingBlock::TorusSwitchDirectOnly:
         return std::make_shared<Hybrid2D>(
             npus_count, bandwidth, latency, Hybrid2D::ExtraFabric::Switch,

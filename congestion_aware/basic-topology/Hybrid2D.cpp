@@ -32,7 +32,8 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
                    const Latency requested_extra_latency,
                    const double direct_preference_factor,
                    std::string routing_plan_path,
-                   const bool base_wraparound) noexcept
+                   const bool base_wraparound,
+                   const LogicalShape logical_shape) noexcept
     : BasicTopology(npus_count,
                     npus_count + (extra_fabric == ExtraFabric::Switch ? 2 : 0),
                     bandwidth, latency),
@@ -45,7 +46,8 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
       extra_latency(requested_extra_latency >= 0 ? requested_extra_latency
                                                  : latency),
       direct_preference_factor(direct_preference_factor),
-      base_wraparound(base_wraparound) {
+      base_wraparound(base_wraparound),
+      logical_shape(logical_shape) {
     if (width * height != npus_count) {
         reject_hybrid_configuration("hybrid topology requires a perfect-square npus_count");
     }
@@ -63,6 +65,18 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         reject_hybrid_configuration(
             "wraparound hybrid requires adaptive or forced switch routing");
     }
+    if (logical_shape == LogicalShape::Grid &&
+        (!base_wraparound || extra_fabric != ExtraFabric::Switch ||
+         routing_policy != RoutingPolicy::Adaptive)) {
+        reject_hybrid_configuration(
+            "grid logical dimensions require the adaptive torus-switch fabric");
+    }
+
+    if (logical_shape == LogicalShape::Grid) {
+        dims_count = 2;
+        npus_count_per_dim = {width, height};
+        bandwidth_per_dim = {bandwidth, bandwidth};
+    }
 
     if (extra_fabric == ExtraFabric::RowRing) {
         if (routing_policy != RoutingPolicy::Static &&
@@ -79,7 +93,10 @@ Hybrid2D::Hybrid2D(const int npus_count, const Bandwidth bandwidth,
         } else if (routing_policy == RoutingPolicy::SwitchOnly) {
             basic_topology_type = TopologyBuildingBlock::TorusSwitchSwitchOnly;
         } else {
-            basic_topology_type = TopologyBuildingBlock::TorusSwitchAdaptive;
+            basic_topology_type =
+                logical_shape == LogicalShape::Grid
+                    ? TopologyBuildingBlock::TorusSwitchAdaptive2D
+                    : TopologyBuildingBlock::TorusSwitchAdaptive;
         }
     } else {
         switch (routing_policy) {
