@@ -40,6 +40,7 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       initial_reconfiguration(false), epoch_started(false), epoch_start(0),
       reconfiguration_count(0), scheduled_bytes(0), transmitted_bytes(0),
+      circuit_wait_time(0), max_circuit_wait_time(0), circuit_transmissions(0),
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
       max_release_slip(0), max_release_slip_request(-1),
       max_release_slip_planned(0), max_release_slip_actual(0) {
@@ -422,6 +423,9 @@ void OcsSwitch::start_transmission(const int plane, Circuit& circuit,
     const auto serialization = positive_event_delay(
         static_cast<double>(bytes) / bw_GBps_to_Bpns(plan_bandwidth));
     const auto wait = event_queue->get_current_time() - chunk->get_link_queued_time();
+    circuit_wait_time += wait;
+    max_circuit_wait_time = std::max(max_circuit_wait_time, wait);
+    ++circuit_transmissions;
     record_route(ocs_route(source, destination, plane), bytes);
     for (auto key : {std::make_pair(source, source_port),
                      std::make_pair(switch_id, destination_port)}) {
@@ -553,6 +557,15 @@ EventTime OcsSwitch::get_reconfiguration_time() const noexcept {
     }
     return total;
 }
+EventTime OcsSwitch::get_circuit_wait_time() const noexcept {
+    return circuit_wait_time;
+}
+EventTime OcsSwitch::get_max_circuit_wait_time() const noexcept {
+    return max_circuit_wait_time;
+}
+uint64_t OcsSwitch::get_circuit_transmissions() const noexcept {
+    return circuit_transmissions;
+}
 
 std::vector<LinkMetrics> OcsSwitch::get_link_metrics() const noexcept {
     auto result = Topology::get_link_metrics();
@@ -575,7 +588,10 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " scheduled_bytes=" << scheduled_bytes
            << " transmitted_bytes=" << transmitted_bytes
            << " assignments=" << planned_assignments
-           << " consumed_assignments=" << consumed_assignments << '\n';
+           << " consumed_assignments=" << consumed_assignments
+           << " circuit_wait_ns=" << circuit_wait_time
+           << " max_circuit_wait_ns=" << max_circuit_wait_time
+           << " circuit_transmissions=" << circuit_transmissions << '\n';
     output << "OCS_REPLAY causal_dispatches=" << causal_dispatches
            << " max_release_slip_ns=" << max_release_slip
            << " request_id=" << max_release_slip_request

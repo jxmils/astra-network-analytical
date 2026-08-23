@@ -204,6 +204,9 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfigu
     EXPECT_EQ(topology.get_reconfiguration_time(), 7);
     EXPECT_EQ(topology.get_scheduled_bytes(), 300);
     EXPECT_EQ(topology.get_transmitted_bytes(), 300);
+    EXPECT_EQ(topology.get_circuit_wait_time(), 101);
+    EXPECT_EQ(topology.get_max_circuit_wait_time(), 101);
+    EXPECT_EQ(topology.get_circuit_transmissions(), 3);
     std::remove(plan.c_str());
 }
 

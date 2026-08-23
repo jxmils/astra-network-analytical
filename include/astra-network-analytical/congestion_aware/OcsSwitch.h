@@ -38,6 +38,9 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] uint64_t get_scheduled_bytes() const noexcept;
     [[nodiscard]] uint64_t get_transmitted_bytes() const noexcept;
     [[nodiscard]] EventTime get_reconfiguration_time() const noexcept;
+    [[nodiscard]] EventTime get_circuit_wait_time() const noexcept;
+    [[nodiscard]] EventTime get_max_circuit_wait_time() const noexcept;
+    [[nodiscard]] uint64_t get_circuit_transmissions() const noexcept;
 
   private:
     using Pair = std::pair<DeviceId, DeviceId>;
@@ -112,6 +115,9 @@ class OcsSwitch final : public BasicTopology {
     int reconfiguration_count;
     uint64_t scheduled_bytes;
     uint64_t transmitted_bytes;
+    EventTime circuit_wait_time;
+    EventTime max_circuit_wait_time;
+    uint64_t circuit_transmissions;
     uint64_t planned_assignments;
     mutable uint64_t consumed_assignments;
     uint64_t causal_dispatches;
