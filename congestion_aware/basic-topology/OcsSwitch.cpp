@@ -40,7 +40,8 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       initial_reconfiguration(false), epoch_started(false), epoch_start(0),
       reconfiguration_count(0), scheduled_bytes(0), transmitted_bytes(0),
-      planned_assignments(0), consumed_assignments(0) {
+      planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
+      max_release_slip(0) {
     basic_topology_type = base_torus ? TopologyBuildingBlock::TorusOcsStatic2D
                                      : TopologyBuildingBlock::OcsSwitch6;
     load_plan(plan_path);
@@ -312,6 +313,12 @@ void OcsSwitch::delayed_chunk_callback(void* argument) noexcept {
 void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
                          const RuntimeAssignment& assignment) noexcept {
     const auto& path = chunk->get_route();
+    if (assignment.request_id >= 0) {
+        ++causal_dispatches;
+        const auto planned = epoch_start + assignment.not_before;
+        max_release_slip = std::max(
+            max_release_slip, event_queue->get_current_time() - planned);
+    }
     if (assignment.plane == -1) {
         Topology::send(std::move(chunk));
         return;
@@ -560,6 +567,8 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " transmitted_bytes=" << transmitted_bytes
            << " assignments=" << planned_assignments
            << " consumed_assignments=" << consumed_assignments << '\n';
+    output << "OCS_REPLAY causal_dispatches=" << causal_dispatches
+           << " max_release_slip_ns=" << max_release_slip << '\n';
 }
 
 void OcsSwitch::build_base_torus() noexcept {
