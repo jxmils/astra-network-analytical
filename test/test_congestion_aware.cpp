@@ -100,7 +100,7 @@ std::string write_ocs_test_plan(const std::string& name,
     auto output = std::ofstream(path);
     output << R"({
   "format": "panel-ocs-plan",
-  "version": 3,
+  "version": 4,
   "endpoints": 16,
   "planes": 6,
   "link_bandwidth_GBps": 1.0,
@@ -114,11 +114,11 @@ std::string write_ocs_test_plan(const std::string& name,
   ],
   "rounds": [
     {"index": 0, "configurations": [
-      {"plane": 0, "stream": 0, "circuits": [{"source": 0, "destination": 1, "bytes": 100}]},
-      {"plane": 1, "stream": 0, "circuits": [{"source": 2, "destination": 3, "bytes": 100}]}
+      {"plane": 0, "stream": 0, "matching": [[0, 1]], "circuits": [{"source": 0, "destination": 1, "bytes": 100}]},
+      {"plane": 1, "stream": 0, "matching": [[2, 3]], "circuits": [{"source": 2, "destination": 3, "bytes": 100}]}
     ]},
     {"index": 1, "configurations": [
-      {"plane": 0, "stream": 0, "circuits": [{"source": 0, "destination": 2, "bytes": 100}]}
+      {"plane": 0, "stream": 0, "matching": [[0, 2]], "circuits": [{"source": 0, "destination": 2, "bytes": 100}]}
     ]}
   ]
 })";
@@ -130,7 +130,7 @@ std::string write_hybrid_ocs_test_plan() {
     const auto path = "/tmp/analytical-torus-ocs.json";
     auto output = std::ofstream(path);
     output << R"({
-  "format": "panel-ocs-plan", "version": 3, "endpoints": 16, "planes": 2,
+  "format": "panel-ocs-plan", "version": 4, "endpoints": 16, "planes": 2,
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
   "assignments": [
@@ -140,10 +140,38 @@ std::string write_hybrid_ocs_test_plan() {
     {"source": 0, "destination": 10, "bytes": 100, "stream": 2, "route": "OCS"}
   ],
   "rounds": [{"index": 0, "configurations": [
-    {"plane": 0, "stream": 0, "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
+    {"plane": 0, "stream": 0, "matching": [[0, 10]], "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
   ]}, {"index": 1, "configurations": [
-    {"plane": 0, "stream": 2, "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
+    {"plane": 0, "stream": 2, "matching": [[0, 10]], "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
   ]}]
+})";
+    output.close();
+    return path;
+}
+
+std::string write_causal_ocs_test_plan() {
+    const auto path = "/tmp/analytical-causal-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 4, "endpoints": 16, "planes": 2,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+    {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "OCS0", "request_id": 0, "not_before_ns": 50},
+    {"source": 2, "destination": 3, "bytes": 100, "stream": 0, "route": "OCS1", "request_id": 1, "not_before_ns": 0},
+    {"source": 4, "destination": 5, "bytes": 100, "stream": 1, "route": "OCS1", "request_id": 2, "not_before_ns": 0},
+    {"source": 6, "destination": 7, "bytes": 100, "stream": 1, "route": "OCS0", "request_id": 3, "not_before_ns": 0}
+  ],
+  "rounds": [
+    {"index": 0, "configurations": [
+      {"plane": 0, "stream": 0, "matching": [[0, 1]], "circuits": [{"source": 0, "destination": 1, "bytes": 100}]},
+      {"plane": 1, "stream": 0, "matching": [[2, 3], [4, 5]], "circuits": [{"source": 2, "destination": 3, "bytes": 100}]}
+    ]},
+    {"index": 1, "configurations": [
+      {"plane": 0, "stream": 1, "matching": [[6, 7]], "circuits": [{"source": 6, "destination": 7, "bytes": 100}]},
+      {"plane": 1, "stream": 1, "matching": [[2, 3], [4, 5]], "circuits": [{"source": 4, "destination": 5, "bytes": 100}]}
+    ]}
+  ]
 })";
     output.close();
     return path;
@@ -171,7 +199,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfigu
     EXPECT_EQ(first.arrival_time, parallel.arrival_time);
     EXPECT_EQ(first.arrival_time, 104);
     EXPECT_EQ(second_round.arrival_time, 205);
-    EXPECT_EQ(topology.get_completed_rounds(), 2);
+    EXPECT_EQ(topology.get_completed_rounds(), 3);
     EXPECT_EQ(topology.get_reconfiguration_count(), 1);
     EXPECT_EQ(topology.get_reconfiguration_time(), 7);
     EXPECT_EQ(topology.get_scheduled_bytes(), 300);
@@ -194,8 +222,8 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchChargesOptionalInitialConf
     }
 
     EXPECT_EQ(observation.arrival_time, 111);
-    EXPECT_EQ(topology.get_reconfiguration_count(), 2);
-    EXPECT_EQ(topology.get_reconfiguration_time(), 14);
+    EXPECT_EQ(topology.get_reconfiguration_count(), 3);
+    EXPECT_EQ(topology.get_reconfiguration_time(), 21);
     std::remove(plan.c_str());
 }
 
@@ -225,6 +253,41 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) 
     EXPECT_EQ(topology.get_transmitted_bytes(), 200);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 64);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink), 64);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       OcsPlanesAdvanceIndependentlyAndHonorCausalAssignments) {
+    const auto plan = write_causal_ocs_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 2, true);
+    auto delayed_plane_zero = ArrivalObservation{event_queue};
+    auto first_plane_one = ArrivalObservation{event_queue};
+    auto second_plane_one = ArrivalObservation{event_queue};
+    auto second_plane_zero = ArrivalObservation{event_queue};
+
+    const auto delayed_route = topology.route(0, 1, 100, 0);
+    const auto first_plane_one_route = topology.route(2, 3, 100, 0);
+    EXPECT_EQ(route_ids(delayed_route), std::vector<DeviceId>({0, 16, 1}));
+    EXPECT_EQ(route_ids(first_plane_one_route), std::vector<DeviceId>({2, 17, 3}));
+    topology.send(std::make_unique<Chunk>(
+        100, delayed_route, 0, record_arrival, &delayed_plane_zero));
+    topology.send(std::make_unique<Chunk>(
+        100, first_plane_one_route, 0, record_arrival, &first_plane_one));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(4, 5, 100, 1), 1,
+        record_arrival, &second_plane_one));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(6, 7, 100, 1), 1,
+        record_arrival, &second_plane_zero));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_GE(delayed_plane_zero.arrival_time, 50);
+    EXPECT_LT(second_plane_one.arrival_time, second_plane_zero.arrival_time);
+    EXPECT_EQ(topology.get_completed_rounds(), 4);
+    EXPECT_EQ(topology.get_reconfiguration_count(), 1);
+    EXPECT_EQ(topology.get_reconfiguration_time(), 7);
     std::remove(plan.c_str());
 }
 
