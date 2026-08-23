@@ -319,6 +319,8 @@ void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
         const auto planned = epoch_start + assignment.not_before;
         const auto actual = event_queue->get_current_time();
         const auto slip = actual - planned;
+        release_records.emplace_back(
+            assignment.request_id, assignment.not_before, actual - epoch_start);
         if (slip > max_release_slip) {
             max_release_slip = slip;
             max_release_slip_request = assignment.request_id;
@@ -579,6 +581,14 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " request_id=" << max_release_slip_request
            << " planned_ns=" << max_release_slip_planned
            << " actual_ns=" << max_release_slip_actual << '\n';
+    auto records = release_records;
+    std::sort(records.begin(), records.end());
+    for (const auto& [request_id, planned, actual] : records) {
+        output << "OCS_RELEASE request_id=" << request_id
+               << " planned_ns=" << planned
+               << " actual_ns=" << actual
+               << " slip_ns=" << actual - planned << '\n';
+    }
 }
 
 void OcsSwitch::build_base_torus() noexcept {

@@ -119,6 +119,7 @@ class OcsSwitch final : public BasicTopology {
     int max_release_slip_request;
     EventTime max_release_slip_planned;
     EventTime max_release_slip_actual;
+    std::vector<std::tuple<int, EventTime, EventTime>> release_records;
 
     void load_plan(const std::string& path) noexcept;
     void validate_plan() const noexcept;
