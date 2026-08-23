@@ -116,6 +116,9 @@ class OcsSwitch final : public BasicTopology {
     mutable uint64_t consumed_assignments;
     uint64_t causal_dispatches;
     EventTime max_release_slip;
+    int max_release_slip_request;
+    EventTime max_release_slip_planned;
+    EventTime max_release_slip_actual;
 
     void load_plan(const std::string& path) noexcept;
     void validate_plan() const noexcept;

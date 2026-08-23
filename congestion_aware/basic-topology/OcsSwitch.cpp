@@ -41,7 +41,8 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       initial_reconfiguration(false), epoch_started(false), epoch_start(0),
       reconfiguration_count(0), scheduled_bytes(0), transmitted_bytes(0),
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
-      max_release_slip(0) {
+      max_release_slip(0), max_release_slip_request(-1),
+      max_release_slip_planned(0), max_release_slip_actual(0) {
     basic_topology_type = base_torus ? TopologyBuildingBlock::TorusOcsStatic2D
                                      : TopologyBuildingBlock::OcsSwitch6;
     load_plan(plan_path);
@@ -316,8 +317,14 @@ void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
     if (assignment.request_id >= 0) {
         ++causal_dispatches;
         const auto planned = epoch_start + assignment.not_before;
-        max_release_slip = std::max(
-            max_release_slip, event_queue->get_current_time() - planned);
+        const auto actual = event_queue->get_current_time();
+        const auto slip = actual - planned;
+        if (slip > max_release_slip) {
+            max_release_slip = slip;
+            max_release_slip_request = assignment.request_id;
+            max_release_slip_planned = assignment.not_before;
+            max_release_slip_actual = actual - epoch_start;
+        }
     }
     if (assignment.plane == -1) {
         Topology::send(std::move(chunk));
@@ -568,7 +575,10 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " assignments=" << planned_assignments
            << " consumed_assignments=" << consumed_assignments << '\n';
     output << "OCS_REPLAY causal_dispatches=" << causal_dispatches
-           << " max_release_slip_ns=" << max_release_slip << '\n';
+           << " max_release_slip_ns=" << max_release_slip
+           << " request_id=" << max_release_slip_request
+           << " planned_ns=" << max_release_slip_planned
+           << " actual_ns=" << max_release_slip_actual << '\n';
 }
 
 void OcsSwitch::build_base_torus() noexcept {
