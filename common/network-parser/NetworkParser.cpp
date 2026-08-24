@@ -241,6 +241,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::TorusOcsDirectPreferred2D;
     }
 
+    if (topology_name == "TorusOcsQtp") {
+        return TopologyBuildingBlock::TorusOcsQtp;
+    }
+
     if (topology_name == "HierarchicalCluster") {
         return TopologyBuildingBlock::HierarchicalCluster;
     }

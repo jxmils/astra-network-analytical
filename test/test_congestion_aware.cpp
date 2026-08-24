@@ -177,6 +177,37 @@ std::string write_causal_ocs_test_plan() {
     return path;
 }
 
+std::string write_qtp_ocs_test_plan() {
+    const auto path = "/tmp/analytical-qtp-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 4, "endpoints": 64, "planes": 2,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+)";
+    auto first = true;
+    for (auto source = 0; source < 64; ++source) {
+        for (auto destination = 0; destination < 64; ++destination) {
+            if (source == destination) {
+                continue;
+            }
+            output << (first ? "" : ",\n")
+                   << "    {\"source\": " << source
+                   << ", \"destination\": " << destination
+                   << ", \"bytes\": 100, \"stream\": 0, "
+                      "\"route\": \"DIRECT\"}";
+            first = false;
+        }
+    }
+    output << R"(
+  ],
+  "rounds": []
+})";
+    output.close();
+    return path;
+}
+
 }  // namespace
 
 TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfiguration) {
@@ -291,6 +322,58 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(topology.get_completed_rounds(), 4);
     EXPECT_EQ(topology.get_reconfiguration_count(), 1);
     EXPECT_EQ(topology.get_reconfiguration_time(), 7);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       QtpExposesFourLogicalDimensionsOnTheSameSixPhysicalPorts) {
+    const auto plan = write_qtp_ocs_test_plan();
+    auto topology = OcsSwitch(64, 1.0, 5.0, plan, 2, true, true);
+    EXPECT_EQ(topology.get_npus_count_per_dim(),
+              std::vector<int>({4, 2, 4, 2}));
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 4 * 64);
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
+              4 * 64);
+
+    const auto& placement = topology.get_logical_to_physical();
+    EXPECT_EQ(placement.size(), 64);
+    EXPECT_EQ(std::set<int>(placement.begin(), placement.end()).size(), 64);
+    for (auto source = 0; source < 64; ++source) {
+        EXPECT_EQ(topology.route(source, source).front()
+                      ->get_connected_device_ids().size(), 6);
+        for (auto destination = 0; destination < 64; ++destination) {
+            if (source == destination) {
+                continue;
+            }
+            const auto path = topology.route(source, destination, 100, 0);
+            const auto classes = route_link_classes(path);
+            EXPECT_TRUE(std::all_of(classes.begin(), classes.end(),
+                                    [](const LinkClass value) {
+                                        return value == LinkClass::BaseMesh;
+                                    }));
+            const auto source_physical = placement[source];
+            const auto destination_physical = placement[destination];
+            const auto x_distance = std::abs(source_physical % 8 -
+                                             destination_physical % 8);
+            const auto y_distance = std::abs(source_physical / 8 -
+                                             destination_physical / 8);
+            const auto expected_hops = std::min(x_distance, 8 - x_distance) +
+                                       std::min(y_distance, 8 - y_distance);
+            EXPECT_EQ(path.size(), expected_hops + 1);
+            auto previous = path.begin();
+            auto following = std::next(previous);
+            while (following != path.end()) {
+                const auto first_physical = placement[previous->device->get_id()];
+                const auto second_physical = placement[following->device->get_id()];
+                const auto dx = std::abs(first_physical % 8 - second_physical % 8);
+                const auto dy = std::abs(first_physical / 8 - second_physical / 8);
+                EXPECT_TRUE((dx == 1 && dy == 0) || (dx == 7 && dy == 0) ||
+                            (dx == 0 && dy == 1) || (dx == 0 && dy == 7));
+                ++previous;
+                ++following;
+            }
+        }
+    }
     std::remove(plan.c_str());
 }
 

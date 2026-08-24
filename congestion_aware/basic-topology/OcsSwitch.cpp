@@ -33,9 +33,11 @@ EventTime positive_event_delay(const double delay) noexcept {
 
 OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
                      const Latency latency, const std::string& plan_path,
-                     const int expected_planes, const bool base_torus) noexcept
+                     const int expected_planes, const bool base_torus,
+                     const bool qtp_embedding) noexcept
     : BasicTopology(npus_count, npus_count + expected_planes, bandwidth, latency),
       planes(0), expected_planes(expected_planes), base_torus(base_torus),
+      qtp_embedding(qtp_embedding),
       width(static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))))),
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       initial_reconfiguration(false), epoch_started(false), epoch_start(0),
@@ -44,15 +46,31 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
       max_release_slip(0), max_release_slip_request(-1),
       max_release_slip_planned(0), max_release_slip_actual(0) {
-    basic_topology_type = base_torus ? TopologyBuildingBlock::TorusOcsStatic2D
-                                     : TopologyBuildingBlock::OcsSwitch6;
+    basic_topology_type = qtp_embedding
+                              ? TopologyBuildingBlock::TorusOcsQtp
+                              : base_torus
+                                    ? TopologyBuildingBlock::TorusOcsStatic2D
+                                    : TopologyBuildingBlock::OcsSwitch6;
     load_plan(plan_path);
     validate_plan();
 
     if (base_torus) {
-        dims_count = 2;
-        npus_count_per_dim = {width, width};
-        bandwidth_per_dim = {bandwidth, bandwidth};
+        if (qtp_embedding) {
+            dims_count = 4;
+            npus_count_per_dim = {4, 2, 4, 2};
+            bandwidth_per_dim = {bandwidth, bandwidth, bandwidth, bandwidth};
+            build_qtp_embedding();
+        } else {
+            dims_count = 2;
+            npus_count_per_dim = {width, width};
+            bandwidth_per_dim = {bandwidth, bandwidth};
+            logical_to_physical.resize(npus_count);
+            physical_to_logical.resize(npus_count);
+            for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
+                logical_to_physical[endpoint] = endpoint;
+                physical_to_logical[endpoint] = endpoint;
+            }
+        }
         build_base_torus();
     }
 
@@ -190,6 +208,9 @@ void OcsSwitch::validate_plan() const noexcept {
     }
     if (base_torus && width * width != npus_count) {
         reject_ocs("torus Hybrid requires a square endpoint count");
+    }
+    if (qtp_embedding && npus_count != 64) {
+        reject_ocs("QTP embedding requires exactly 64 endpoints");
     }
     if (reconfiguration_ns < 0) {
         reject_ocs("reconfiguration latency must be nonnegative");
@@ -607,6 +628,31 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
     }
 }
 
+const std::vector<int>& OcsSwitch::get_logical_to_physical() const noexcept {
+    return logical_to_physical;
+}
+
+void OcsSwitch::build_qtp_embedding() noexcept {
+    if (npus_count != 64 || width != 8) {
+        reject_ocs("QTP embedding requires an 8x8 physical torus");
+    }
+    constexpr int qtp8[] = {0, 1, 4, 5, 7, 2, 3, 6};
+    logical_to_physical.assign(npus_count, -1);
+    physical_to_logical.assign(npus_count, -1);
+    for (auto logical = 0; logical < npus_count; ++logical) {
+        const auto a = logical % 4;
+        const auto b = (logical / 4) % 2;
+        const auto c = (logical / 8) % 4;
+        const auto d = (logical / 32) % 2;
+        const auto physical = qtp8[c + 4 * d] * 8 + qtp8[a + 4 * b];
+        if (physical_to_logical[physical] != -1) {
+            reject_ocs("QTP embedding is not a permutation");
+        }
+        logical_to_physical[logical] = physical;
+        physical_to_logical[physical] = logical;
+    }
+}
+
 void OcsSwitch::build_base_torus() noexcept {
     auto remember = [this](const DeviceId first, const DeviceId second) {
         const auto ports = connect(first, second, bandwidth, latency, true,
@@ -616,16 +662,17 @@ void OcsSwitch::build_base_torus() noexcept {
     };
     for (auto y = 0; y < width; ++y) {
         for (auto x = 0; x < width; ++x) {
-            const auto node = y * width + x;
+            const auto physical = y * width + x;
+            const auto node = physical_to_logical[physical];
             if (x + 1 < width) {
-                remember(node, node + 1);
+                remember(node, physical_to_logical[physical + 1]);
             } else {
-                remember(node, y * width);
+                remember(node, physical_to_logical[y * width]);
             }
             if (y + 1 < width) {
-                remember(node, node + width);
+                remember(node, physical_to_logical[physical + width]);
             } else {
-                remember(node, x);
+                remember(node, physical_to_logical[x]);
             }
         }
     }
@@ -648,20 +695,22 @@ int OcsSwitch::step_towards(const int current, const int target, const int exten
 Route OcsSwitch::direct_route(const DeviceId src, const DeviceId dest) const noexcept {
     auto path = Route();
     auto current = src;
-    auto x = src % width;
-    auto y = src / width;
-    const auto destination_x = dest % width;
-    const auto destination_y = dest / width;
+    const auto source_physical = logical_to_physical[src];
+    const auto destination_physical = logical_to_physical[dest];
+    auto x = source_physical % width;
+    auto y = source_physical / width;
+    const auto destination_x = destination_physical % width;
+    const auto destination_y = destination_physical / width;
     while (x != destination_x) {
         const auto next_x = step_towards(x, destination_x, width, (x & 1) != 0);
-        const auto next = y * width + next_x;
+        const auto next = physical_to_logical[y * width + next_x];
         path.emplace_back(devices[current], base_ports.at({current, next}));
         current = next;
         x = next_x;
     }
     while (y != destination_y) {
         const auto next_y = step_towards(y, destination_y, width, (y & 1) != 0);
-        const auto next = next_y * width + x;
+        const auto next = physical_to_logical[next_y * width + x];
         path.emplace_back(devices[current], base_ports.at({current, next}));
         current = next;
         y = next_y;

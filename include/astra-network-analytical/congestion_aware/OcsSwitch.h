@@ -20,7 +20,7 @@ class OcsSwitch final : public BasicTopology {
   public:
     OcsSwitch(int npus_count, Bandwidth bandwidth, Latency latency,
               const std::string& plan_path, int expected_planes = 6,
-              bool base_torus = false) noexcept;
+              bool base_torus = false, bool qtp_embedding = false) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
@@ -41,6 +41,7 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] EventTime get_circuit_wait_time() const noexcept;
     [[nodiscard]] EventTime get_max_circuit_wait_time() const noexcept;
     [[nodiscard]] uint64_t get_circuit_transmissions() const noexcept;
+    [[nodiscard]] const std::vector<int>& get_logical_to_physical() const noexcept;
 
   private:
     using Pair = std::pair<DeviceId, DeviceId>;
@@ -96,6 +97,7 @@ class OcsSwitch final : public BasicTopology {
     int planes;
     int expected_planes;
     bool base_torus;
+    bool qtp_embedding;
     int width;
     double plan_bandwidth;
     double propagation_ns;
@@ -105,6 +107,8 @@ class OcsSwitch final : public BasicTopology {
     std::vector<std::vector<LinkId>> to_switch_ports;
     std::vector<std::vector<LinkId>> from_switch_ports;
     std::map<Pair, LinkId> base_ports;
+    std::vector<int> logical_to_physical;
+    std::vector<int> physical_to_logical;
     std::map<std::tuple<int, DeviceId, DeviceId, int>,
              std::deque<std::unique_ptr<Chunk>>> pending;
     mutable std::map<AssignmentKey, std::deque<RuntimeAssignment>> route_assignments;
@@ -129,6 +133,7 @@ class OcsSwitch final : public BasicTopology {
 
     void load_plan(const std::string& path) noexcept;
     void validate_plan() const noexcept;
+    void build_qtp_embedding() noexcept;
     void build_base_torus() noexcept;
     [[nodiscard]] Route direct_route(DeviceId src, DeviceId dest) const noexcept;
     [[nodiscard]] int step_towards(int current, int target, int extent,
