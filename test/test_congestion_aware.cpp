@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/HierarchicalCluster.h"
+#include "congestion_aware/IdealFlex.h"
 #include "congestion_aware/Mesh2D.h"
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
@@ -19,6 +20,7 @@ LICENSE file in the root directory of this source tree.
 #include <cstdio>
 #include <cmath>
 #include <fstream>
+#include <numeric>
 #include <set>
 #include <vector>
 
@@ -100,7 +102,7 @@ std::string write_ocs_test_plan(const std::string& name,
     auto output = std::ofstream(path);
     output << R"({
   "format": "panel-ocs-plan",
-  "version": 4,
+  "version": 5,
   "endpoints": 16,
   "planes": 6,
   "link_bandwidth_GBps": 1.0,
@@ -108,9 +110,9 @@ std::string write_ocs_test_plan(const std::string& name,
   "reconfiguration_ns": 7.0,
   "initial_reconfiguration": )" << (initial_reconfiguration ? "true" : "false") << R"(,
   "assignments": [
-    {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "OCS"},
-    {"source": 2, "destination": 3, "bytes": 100, "stream": 0, "route": "OCS"},
-    {"source": 0, "destination": 2, "bytes": 100, "stream": 0, "route": "OCS"}
+    {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "OCS", "stripes": [{"plane": 0, "bytes": 100}]},
+    {"source": 2, "destination": 3, "bytes": 100, "stream": 0, "route": "OCS", "stripes": [{"plane": 1, "bytes": 100}]},
+    {"source": 0, "destination": 2, "bytes": 100, "stream": 0, "route": "OCS", "stripes": [{"plane": 0, "bytes": 100}]}
   ],
   "rounds": [
     {"index": 0, "configurations": [
@@ -130,14 +132,14 @@ std::string write_hybrid_ocs_test_plan() {
     const auto path = "/tmp/analytical-torus-ocs.json";
     auto output = std::ofstream(path);
     output << R"({
-  "format": "panel-ocs-plan", "version": 4, "endpoints": 16, "planes": 2,
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 2,
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
   "assignments": [
     {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "DIRECT"},
-    {"source": 0, "destination": 10, "bytes": 100, "stream": 0, "route": "OCS"},
+    {"source": 0, "destination": 10, "bytes": 100, "stream": 0, "route": "OCS", "stripes": [{"plane": 0, "bytes": 100}]},
     {"source": 0, "destination": 10, "bytes": 100, "stream": 1, "route": "DIRECT"},
-    {"source": 0, "destination": 10, "bytes": 100, "stream": 2, "route": "OCS"}
+    {"source": 0, "destination": 10, "bytes": 100, "stream": 2, "route": "OCS", "stripes": [{"plane": 0, "bytes": 100}]}
   ],
   "rounds": [{"index": 0, "configurations": [
     {"plane": 0, "stream": 0, "matching": [[0, 10]], "circuits": [{"source": 0, "destination": 10, "bytes": 100}]}
@@ -149,18 +151,42 @@ std::string write_hybrid_ocs_test_plan() {
     return path;
 }
 
+std::string write_striped_ocs_test_plan() {
+    const auto path = "/tmp/analytical-striped-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 2,
+  "logical_dimensions": [4, 4],
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+    {"source": 0, "destination": 1, "bytes": 100, "stream": 0,
+     "route": "OCS", "stripes": [
+       {"plane": 0, "bytes": 50}, {"plane": 1, "bytes": 50}]}
+  ],
+  "rounds": [{"index": 0, "configurations": [
+    {"plane": 0, "stream": 0, "matching": [[0, 1]],
+     "circuits": [{"source": 0, "destination": 1, "bytes": 50}]},
+    {"plane": 1, "stream": 0, "matching": [[0, 1]],
+     "circuits": [{"source": 0, "destination": 1, "bytes": 50}]}
+  ]}]
+})";
+    output.close();
+    return path;
+}
+
 std::string write_causal_ocs_test_plan() {
     const auto path = "/tmp/analytical-causal-ocs.json";
     auto output = std::ofstream(path);
     output << R"({
-  "format": "panel-ocs-plan", "version": 4, "endpoints": 16, "planes": 2,
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 2,
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
   "assignments": [
-    {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "OCS0", "request_id": 0, "not_before_ns": 50},
-    {"source": 2, "destination": 3, "bytes": 100, "stream": 0, "route": "OCS1", "request_id": 1, "not_before_ns": 0},
-    {"source": 4, "destination": 5, "bytes": 100, "stream": 1, "route": "OCS1", "request_id": 2, "not_before_ns": 0},
-    {"source": 6, "destination": 7, "bytes": 100, "stream": 1, "route": "OCS0", "request_id": 3, "not_before_ns": 0}
+    {"source": 0, "destination": 1, "bytes": 100, "stream": 0, "route": "OCS0", "stripes": [{"plane": 0, "bytes": 100}], "request_id": 0, "not_before_ns": 50},
+    {"source": 2, "destination": 3, "bytes": 100, "stream": 0, "route": "OCS1", "stripes": [{"plane": 1, "bytes": 100}], "request_id": 1, "not_before_ns": 0},
+    {"source": 4, "destination": 5, "bytes": 100, "stream": 1, "route": "OCS1", "stripes": [{"plane": 1, "bytes": 100}], "request_id": 2, "not_before_ns": 0},
+    {"source": 6, "destination": 7, "bytes": 100, "stream": 1, "route": "OCS0", "stripes": [{"plane": 0, "bytes": 100}], "request_id": 3, "not_before_ns": 0}
   ],
   "rounds": [
     {"index": 0, "configurations": [
@@ -181,7 +207,7 @@ std::string write_qtp_ocs_test_plan() {
     const auto path = "/tmp/analytical-qtp-ocs.json";
     auto output = std::ofstream(path);
     output << R"({
-  "format": "panel-ocs-plan", "version": 4, "endpoints": 64, "planes": 2,
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 64, "planes": 2,
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
   "assignments": [
@@ -259,6 +285,60 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchChargesOptionalInitialConf
     EXPECT_EQ(topology.get_reconfiguration_count(), 3);
     EXPECT_EQ(topology.get_reconfiguration_time(), 21);
     std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       OcsSwitchStripesOneLogicalTransferAndJoinsCompletion) {
+    const auto plan = write_striped_ocs_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 2);
+    auto observation = ArrivalObservation{event_queue};
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 1, 100), record_arrival, &observation));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(observation.arrival_time, 57);
+    EXPECT_EQ(topology.get_scheduled_bytes(), 100);
+    EXPECT_EQ(topology.get_transmitted_bytes(), 100);
+    EXPECT_EQ(topology.get_circuit_transmissions(), 2);
+    EXPECT_EQ(topology.get_max_active_ports(0), 2);
+    EXPECT_EQ(topology.get_max_distinct_peers(0), 1);
+    const auto routes = topology.get_route_metrics();
+    ASSERT_EQ(routes.size(), 1);
+    EXPECT_EQ(routes.front().hops, 1);
+    EXPECT_EQ(routes.front().physical_edges, 2);
+    EXPECT_EQ(routes.front().messages, 1);
+    EXPECT_EQ(routes.front().payload_bytes, 100);
+    EXPECT_EQ(routes.front().byte_hops, 200);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       IdealFlexUsesOneLogicalHopAndSixPortCapacity) {
+    auto topology = IdealFlex(64, 1.0, 5.0);
+    auto observation = ArrivalObservation{event_queue};
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(0, 1), record_arrival, &observation));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(observation.arrival_time, 27);
+    const auto routes = topology.get_route_metrics();
+    ASSERT_EQ(routes.size(), 1);
+    EXPECT_EQ(routes[0].hops, 1);
+    EXPECT_EQ(routes[0].physical_edges, 2);
+    EXPECT_EQ(routes[0].payload_bytes, 100);
+    EXPECT_EQ(routes[0].byte_hops, 200);
+    const auto links = topology.get_link_metrics();
+    EXPECT_EQ(count_links(links, LinkClass::SwitchUplink), 12 * 64);
+    const auto physical_bytes = std::accumulate(
+        links.begin(), links.end(), uint64_t{0},
+        [](const uint64_t total, const LinkMetrics& metric) {
+            return total + metric.bytes;
+        });
+    EXPECT_EQ(physical_bytes, 200);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) {

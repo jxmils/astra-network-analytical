@@ -229,6 +229,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::OcsSwitch6;
     }
 
+    if (topology_name == "IdealFlex6R4") {
+        return TopologyBuildingBlock::IdealFlex6R4;
+    }
+
     if (topology_name == "TorusOcsStatic2D") {
         return TopologyBuildingBlock::TorusOcsStatic2D;
     }

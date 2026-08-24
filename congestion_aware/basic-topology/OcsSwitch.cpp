@@ -72,7 +72,24 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
             }
         }
         build_base_torus();
+    } else if (!plan_dimensions.empty()) {
+        dims_count = static_cast<int>(plan_dimensions.size());
+        npus_count_per_dim = plan_dimensions;
+        bandwidth_per_dim.assign(plan_dimensions.size(), bandwidth);
     }
+
+    active_endpoint_planes.resize(npus_count);
+    active_endpoint_tx_planes.resize(npus_count);
+    active_endpoint_rx_planes.resize(npus_count);
+    active_endpoint_peers.resize(npus_count);
+    active_endpoint_tx_peers.resize(npus_count);
+    active_endpoint_rx_peers.resize(npus_count);
+    max_active_endpoint_ports.assign(npus_count, 0);
+    max_active_endpoint_tx_ports.assign(npus_count, 0);
+    max_active_endpoint_rx_ports.assign(npus_count, 0);
+    max_distinct_endpoint_peers.assign(npus_count, 0);
+    max_distinct_endpoint_tx_peers.assign(npus_count, 0);
+    max_distinct_endpoint_rx_peers.assign(npus_count, 0);
 
     to_switch_ports.assign(planes, std::vector<LinkId>(npus_count));
     from_switch_ports.assign(planes, std::vector<LinkId>(npus_count));
@@ -101,7 +118,7 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
     try {
         const auto root = YAML::LoadFile(path);
         if (root["format"].as<std::string>() != "panel-ocs-plan" ||
-            root["version"].as<int>() != 4) {
+            root["version"].as<int>() != 5) {
             reject_ocs("unsupported plan format or version");
         }
         if (root["endpoints"].as<int>() != npus_count) {
@@ -113,6 +130,11 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
         propagation_ns = root["propagation_ns"].as<double>();
         reconfiguration_ns = root["reconfiguration_ns"].as<double>();
         initial_reconfiguration = root["initial_reconfiguration"].as<bool>();
+        if (root["logical_dimensions"] && root["logical_dimensions"].IsSequence()) {
+            for (const auto& extent : root["logical_dimensions"]) {
+                plan_dimensions.push_back(extent.as<int>());
+            }
+        }
         if (!root["assignments"] || !root["assignments"].IsSequence()) {
             reject_ocs("plan has no route assignments");
         }
@@ -133,25 +155,33 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
                 stream < 0 || request_id < -1 || not_before < 0) {
                 reject_ocs("invalid route assignment");
             }
-            auto plane = -1;
-            if (route == "OCS") {
-                plane = -2;
-            } else if (route.rfind("OCS", 0) == 0 && route.size() > 3) {
-                if (!std::all_of(route.begin() + 3, route.end(),
-                                 [](const char value) {
-                                     return value >= '0' && value <= '9';
-                                 })) {
-                    reject_ocs("route assignment has an invalid plane suffix");
-                }
-                plane = std::stoi(route.substr(3));
-            } else if (route != "DIRECT") {
+            const auto direct = route == "DIRECT";
+            if (!direct && route.rfind("OCS", 0) != 0) {
                 reject_ocs("invalid route assignment");
             }
-            if (plane < -2 || plane >= planes) {
-                reject_ocs("route assignment references an unavailable plane");
+            auto stripes = std::vector<PlaneStripe>();
+            if (!direct) {
+                if (!assignment["stripes"] || !assignment["stripes"].IsSequence()) {
+                    reject_ocs("optical route assignment has no stripes");
+                }
+                auto striped_bytes = uint64_t{0};
+                auto used_planes = std::set<int>();
+                for (const auto& stripe : assignment["stripes"]) {
+                    const auto plane = stripe["plane"].as<int>();
+                    const auto stripe_bytes = stripe["bytes"].as<uint64_t>();
+                    if (plane < 0 || plane >= planes || stripe_bytes == 0 ||
+                        !used_planes.insert(plane).second) {
+                        reject_ocs("invalid optical stripe");
+                    }
+                    stripes.push_back(PlaneStripe{plane, stripe_bytes});
+                    striped_bytes += stripe_bytes;
+                }
+                if (striped_bytes != bytes) {
+                    reject_ocs("optical stripes do not reconstruct logical bytes");
+                }
             }
             route_assignments[{source, destination, bytes, stream}].push_back(
-                RuntimeAssignment{plane, not_before, request_id});
+                RuntimeAssignment{direct, std::move(stripes), not_before, request_id});
             ++planned_assignments;
         }
         auto expected_round = 0;
@@ -162,7 +192,11 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
             for (const auto& configuration_node : round_node["configurations"]) {
                 auto configuration = Configuration{
                     configuration_node["plane"].as<int>(),
-                    configuration_node["stream"].as<int>(), {}, {}};
+                    configuration_node["stream"].as<int>(),
+                    configuration_node["force_reconfiguration"]
+                        ? configuration_node["force_reconfiguration"].as<bool>()
+                        : false,
+                    {}, {}};
                 if (!configuration_node["matching"] ||
                     !configuration_node["matching"].IsSequence()) {
                     reject_ocs("configuration has no installed matching");
@@ -214,6 +248,18 @@ void OcsSwitch::validate_plan() const noexcept {
     }
     if (reconfiguration_ns < 0) {
         reject_ocs("reconfiguration latency must be nonnegative");
+    }
+    if (!plan_dimensions.empty()) {
+        auto product = 1;
+        for (const auto extent : plan_dimensions) {
+            if (extent < 2) {
+                reject_ocs("plan dimension extent must be at least two");
+            }
+            product *= extent;
+        }
+        if (product != npus_count) {
+            reject_ocs("plan dimensions do not multiply to endpoint count");
+        }
     }
     for (auto plane = 0; plane < planes; ++plane) {
         for (const auto& configuration : plane_states[plane].configurations) {
@@ -276,14 +322,16 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
     found->second.pop_front();
     dispatch_assignments[key].push_back(assignment);
     ++consumed_assignments;
-    if (assignment.plane == -1) {
+    if (assignment.direct) {
         if (!base_torus) {
             reject_ocs("direct assignment requires a persistent base fabric");
         }
         return direct_route(src, dest);
     }
-    const auto plane = assignment.plane >= 0 ? assignment.plane : 0;
-    return ocs_route(src, dest, plane);
+    if (assignment.stripes.empty()) {
+        reject_ocs("optical assignment has no runtime stripes");
+    }
+    return ocs_route(src, dest, assignment.stripes.front().plane);
 }
 
 Route OcsSwitch::ocs_route(const DeviceId src, const DeviceId dest,
@@ -350,20 +398,33 @@ void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
             max_release_slip_actual = actual - epoch_start;
         }
     }
-    if (assignment.plane == -1) {
+    if (assignment.direct) {
         Topology::send(std::move(chunk));
         return;
     }
     const auto pair = Pair{path.front().device->get_id(), path.back().device->get_id()};
-    chunk->mark_link_queued(event_queue->get_current_time());
-    pending[{assignment.plane, pair.first, pair.second, chunk->get_stream()}]
-        .push_back(std::move(chunk));
-    if (assignment.plane >= 0) {
-        try_start_transmissions(assignment.plane);
-    } else {
-        for (auto plane = 0; plane < planes; ++plane) {
-            try_start_transmissions(plane);
-        }
+    if (assignment.stripes.empty()) {
+        reject_ocs("optical dispatch has no stripes");
+    }
+    const auto logical_bytes = chunk->get_size();
+    const auto stream = chunk->get_stream();
+    const auto queued_at = event_queue->get_current_time();
+    const auto transfer = std::make_shared<LogicalTransfer>(LogicalTransfer{
+        std::move(chunk), pair, stream, queued_at,
+        static_cast<int>(assignment.stripes.size())});
+    auto maximum_stripe = ChunkSize{0};
+    for (const auto& stripe : assignment.stripes) {
+        maximum_stripe = std::max(maximum_stripe, stripe.bytes);
+        pending[{stripe.plane, pair.first, pair.second, stream}].push_back(
+            PendingStripe{transfer, stripe.bytes});
+    }
+    record_route_metrics(
+        RouteClass::Switch, 1, 2, logical_bytes,
+        positive_event_delay(propagation_ns),
+        positive_event_delay(static_cast<double>(maximum_stripe) /
+                             bw_GBps_to_Bpns(plan_bandwidth)));
+    for (const auto& stripe : assignment.stripes) {
+        try_start_transmissions(stripe.plane);
     }
 }
 
@@ -412,42 +473,70 @@ void OcsSwitch::try_start_transmissions(const int plane) noexcept {
         progress = false;
         auto& configuration = state.configurations[state.current];
         for (auto& circuit : configuration.circuits) {
-            for (const auto assignment_plane : {plane, -2}) {
-                auto found = pending.find({assignment_plane, circuit.pair.first,
-                                           circuit.pair.second, configuration.stream});
-                if (circuit.busy || circuit.remaining == 0 || found == pending.end() ||
-                    found->second.empty()) {
-                    continue;
-                }
-                auto& chunk = found->second.front();
-                if (chunk->get_size() > circuit.remaining) {
-                    reject_ocs("chunk exceeds the remaining circuit byte quota");
-                }
-                auto selected = std::move(chunk);
-                found->second.pop_front();
-                start_transmission(plane, circuit, std::move(selected));
-                progress = true;
-                break;
+            auto found = pending.find({plane, circuit.pair.first,
+                                       circuit.pair.second, configuration.stream});
+            if (circuit.busy || circuit.remaining == 0 || found == pending.end() ||
+                found->second.empty()) {
+                continue;
             }
+            auto selected = std::move(found->second.front());
+            found->second.pop_front();
+            if (selected.bytes > circuit.remaining) {
+                reject_ocs("stripe exceeds the remaining circuit byte quota");
+            }
+            start_transmission(plane, circuit, std::move(selected));
+            progress = true;
         }
     }
 }
 
 void OcsSwitch::start_transmission(const int plane, Circuit& circuit,
-                                   std::unique_ptr<Chunk> chunk) noexcept {
+                                   PendingStripe stripe) noexcept {
     circuit.busy = true;
-    const auto bytes = chunk->get_size();
+    const auto bytes = stripe.bytes;
     const auto [source, destination] = circuit.pair;
     const auto switch_id = npus_count + plane;
     const auto source_port = to_switch_ports[plane][source];
     const auto destination_port = from_switch_ports[plane][destination];
     const auto serialization = positive_event_delay(
         static_cast<double>(bytes) / bw_GBps_to_Bpns(plan_bandwidth));
-    const auto wait = event_queue->get_current_time() - chunk->get_link_queued_time();
+    const auto wait = event_queue->get_current_time() - stripe.transfer->queued_at;
     circuit_wait_time += wait;
     max_circuit_wait_time = std::max(max_circuit_wait_time, wait);
     ++circuit_transmissions;
-    record_route(ocs_route(source, destination, plane), bytes);
+    plane_states[plane].data_time += serialization;
+    ++active_endpoint_planes[source][plane];
+    ++active_endpoint_planes[destination][plane];
+    ++active_endpoint_tx_planes[source][plane];
+    ++active_endpoint_rx_planes[destination][plane];
+    ++active_endpoint_peers[source][destination];
+    ++active_endpoint_peers[destination][source];
+    ++active_endpoint_tx_peers[source][destination];
+    ++active_endpoint_rx_peers[destination][source];
+    max_active_endpoint_ports[source] = std::max(
+        max_active_endpoint_ports[source],
+        static_cast<int>(active_endpoint_planes[source].size()));
+    max_active_endpoint_ports[destination] = std::max(
+        max_active_endpoint_ports[destination],
+        static_cast<int>(active_endpoint_planes[destination].size()));
+    max_active_endpoint_tx_ports[source] = std::max(
+        max_active_endpoint_tx_ports[source],
+        static_cast<int>(active_endpoint_tx_planes[source].size()));
+    max_active_endpoint_rx_ports[destination] = std::max(
+        max_active_endpoint_rx_ports[destination],
+        static_cast<int>(active_endpoint_rx_planes[destination].size()));
+    max_distinct_endpoint_peers[source] = std::max(
+        max_distinct_endpoint_peers[source],
+        static_cast<int>(active_endpoint_peers[source].size()));
+    max_distinct_endpoint_peers[destination] = std::max(
+        max_distinct_endpoint_peers[destination],
+        static_cast<int>(active_endpoint_peers[destination].size()));
+    max_distinct_endpoint_tx_peers[source] = std::max(
+        max_distinct_endpoint_tx_peers[source],
+        static_cast<int>(active_endpoint_tx_peers[source].size()));
+    max_distinct_endpoint_rx_peers[destination] = std::max(
+        max_distinct_endpoint_rx_peers[destination],
+        static_cast<int>(active_endpoint_rx_peers[destination].size()));
     for (auto key : {std::make_pair(source, source_port),
                      std::make_pair(switch_id, destination_port)}) {
         auto& metric = physical_metrics.at(key);
@@ -459,7 +548,7 @@ void OcsSwitch::start_transmission(const int plane, Circuit& circuit,
         metric.queue_wait_time += wait;
     }
     auto* transmission = new Transmission{
-        this, std::move(chunk), plane, circuit.pair, bytes};
+        this, std::move(stripe.transfer), plane, circuit.pair, bytes};
     event_queue->schedule_event(event_queue->get_current_time() + serialization,
                                 serialization_callback, transmission);
 }
@@ -490,6 +579,31 @@ void OcsSwitch::finish_serialization(Transmission* transmission) noexcept {
     }
     circuit->remaining -= transmission->bytes;
     circuit->busy = false;
+    const auto [source, destination] = transmission->pair;
+    if (--active_endpoint_planes[source][transmission->plane] == 0) {
+        active_endpoint_planes[source].erase(transmission->plane);
+    }
+    if (--active_endpoint_planes[destination][transmission->plane] == 0) {
+        active_endpoint_planes[destination].erase(transmission->plane);
+    }
+    if (--active_endpoint_tx_planes[source][transmission->plane] == 0) {
+        active_endpoint_tx_planes[source].erase(transmission->plane);
+    }
+    if (--active_endpoint_rx_planes[destination][transmission->plane] == 0) {
+        active_endpoint_rx_planes[destination].erase(transmission->plane);
+    }
+    if (--active_endpoint_peers[source][destination] == 0) {
+        active_endpoint_peers[source].erase(destination);
+    }
+    if (--active_endpoint_peers[destination][source] == 0) {
+        active_endpoint_peers[destination].erase(source);
+    }
+    if (--active_endpoint_tx_peers[source][destination] == 0) {
+        active_endpoint_tx_peers[source].erase(destination);
+    }
+    if (--active_endpoint_rx_peers[destination][source] == 0) {
+        active_endpoint_rx_peers[destination].erase(source);
+    }
     transmitted_bytes += transmission->bytes;
     const auto propagation = positive_event_delay(propagation_ns);
     event_queue->schedule_event(event_queue->get_current_time() + propagation,
@@ -501,7 +615,10 @@ void OcsSwitch::finish_serialization(Transmission* transmission) noexcept {
 }
 
 void OcsSwitch::finish_arrival(Transmission* transmission) noexcept {
-    transmission->chunk->invoke_callback();
+    auto& transfer = transmission->transfer;
+    if (--transfer->remaining_stripes == 0) {
+        transfer->chunk->invoke_callback();
+    }
 }
 
 bool OcsSwitch::configuration_complete(const int plane) const noexcept {
@@ -534,7 +651,8 @@ void OcsSwitch::advance_configuration(const int plane) noexcept {
     if (state.current >= state.configurations.size()) {
         return;
     }
-    if (configuration_changed(state.configurations[previous],
+    if (state.configurations[state.current].force_reconfiguration ||
+        configuration_changed(state.configurations[previous],
                               state.configurations[state.current])) {
         ++state.reconfigurations;
         ++reconfiguration_count;
@@ -578,6 +696,33 @@ EventTime OcsSwitch::get_reconfiguration_time() const noexcept {
     }
     return total;
 }
+EventTime OcsSwitch::get_max_plane_reconfiguration_time() const noexcept {
+    auto result = EventTime{0};
+    for (const auto& state : plane_states) {
+        result = std::max(result, state.reconfiguration_time);
+    }
+    return result;
+}
+EventTime OcsSwitch::get_critical_plane_reconfiguration_time() const noexcept {
+    if (plane_states.empty()) {
+        return 0;
+    }
+    const auto critical = std::max_element(
+        plane_states.begin(), plane_states.end(),
+        [](const PlaneState& first, const PlaneState& second) {
+            return first.reconfiguration_time + first.data_time <
+                   second.reconfiguration_time + second.data_time;
+        });
+    return critical->reconfiguration_time;
+}
+EventTime OcsSwitch::get_plane_schedule_makespan() const noexcept {
+    auto result = EventTime{0};
+    for (const auto& state : plane_states) {
+        result = std::max(
+            result, state.reconfiguration_time + state.data_time);
+    }
+    return result;
+}
 EventTime OcsSwitch::get_circuit_wait_time() const noexcept {
     return circuit_wait_time;
 }
@@ -586,6 +731,14 @@ EventTime OcsSwitch::get_max_circuit_wait_time() const noexcept {
 }
 uint64_t OcsSwitch::get_circuit_transmissions() const noexcept {
     return circuit_transmissions;
+}
+int OcsSwitch::get_max_active_ports(const DeviceId endpoint) const noexcept {
+    assert(0 <= endpoint && endpoint < npus_count);
+    return max_active_endpoint_ports[endpoint];
+}
+int OcsSwitch::get_max_distinct_peers(const DeviceId endpoint) const noexcept {
+    assert(0 <= endpoint && endpoint < npus_count);
+    return max_distinct_endpoint_peers[endpoint];
 }
 
 std::vector<LinkMetrics> OcsSwitch::get_link_metrics() const noexcept {
@@ -606,6 +759,11 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " completed_rounds=" << get_completed_rounds()
            << " reconfigurations=" << reconfiguration_count
            << " reconfiguration_ns=" << get_reconfiguration_time()
+           << " max_plane_reconfiguration_ns="
+           << get_max_plane_reconfiguration_time()
+           << " critical_plane_reconfiguration_ns="
+           << get_critical_plane_reconfiguration_time()
+           << " plane_schedule_makespan_ns=" << get_plane_schedule_makespan()
            << " scheduled_bytes=" << scheduled_bytes
            << " transmitted_bytes=" << transmitted_bytes
            << " assignments=" << planned_assignments
@@ -613,6 +771,33 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " circuit_wait_ns=" << circuit_wait_time
            << " max_circuit_wait_ns=" << max_circuit_wait_time
            << " circuit_transmissions=" << circuit_transmissions << '\n';
+    for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
+        output << "OCS_ENDPOINT endpoint=" << endpoint
+               << " max_active_ports=" << max_active_endpoint_ports[endpoint]
+               << " max_active_tx_ports="
+               << max_active_endpoint_tx_ports[endpoint]
+               << " max_active_rx_ports="
+               << max_active_endpoint_rx_ports[endpoint]
+               << " max_distinct_peers=" << max_distinct_endpoint_peers[endpoint]
+               << " max_distinct_tx_peers="
+               << max_distinct_endpoint_tx_peers[endpoint]
+               << " max_distinct_rx_peers="
+               << max_distinct_endpoint_rx_peers[endpoint]
+               << " peak_injection_GBps="
+               << max_active_endpoint_tx_ports[endpoint] * plan_bandwidth
+               << " peak_receive_GBps="
+               << max_active_endpoint_rx_ports[endpoint] * plan_bandwidth << '\n';
+    }
+    for (auto plane = 0; plane < planes; ++plane) {
+        const auto& state = plane_states[plane];
+        output << "OCS_PLANE plane=" << plane
+               << " configurations=" << state.configurations.size()
+               << " reconfigurations=" << state.reconfigurations
+               << " reconfiguration_ns=" << state.reconfiguration_time
+               << " data_ns=" << state.data_time
+               << " finish_ns="
+               << state.reconfiguration_time + state.data_time << '\n';
+    }
     output << "OCS_REPLAY causal_dispatches=" << causal_dispatches
            << " max_release_slip_ns=" << max_release_slip
            << " request_id=" << max_release_slip_request

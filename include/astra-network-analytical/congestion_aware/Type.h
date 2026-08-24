@@ -85,6 +85,7 @@ struct LinkMetrics {
 struct RouteMetrics {
     RouteClass route_class;
     int hops;
+    int physical_edges;
     uint64_t messages;
     uint64_t payload_bytes;
     uint64_t byte_hops;

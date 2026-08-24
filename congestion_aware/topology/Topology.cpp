@@ -108,6 +108,7 @@ void Topology::print_route_metrics(std::ostream& output) const {
     for (const auto& metric : get_route_metrics()) {
         output << "NETWORK_ROUTE class=" << route_class_name(metric.route_class)
                << " hops=" << metric.hops
+               << " physical_edges=" << metric.physical_edges
                << " messages=" << metric.messages
                << " payload_bytes=" << metric.payload_bytes
                << " byte_hops=" << metric.byte_hops
@@ -147,16 +148,31 @@ void Topology::record_route(const Route& route, const ChunkSize chunk_size) noex
         ++next;
     }
 
-    const auto key = std::make_pair(route_class, hops);
+    record_route_metrics(route_class, hops, hops, chunk_size,
+                         propagation_time, serialization_time);
+}
+
+void Topology::record_route_metrics(
+    const RouteClass route_class, const int logical_hops,
+    const int physical_edges, const ChunkSize chunk_size,
+    const EventTime propagation_time,
+    const EventTime serialization_time) noexcept {
+    assert(logical_hops > 0);
+    assert(physical_edges >= logical_hops);
+    assert(chunk_size > 0);
+    const auto key = std::make_pair(route_class, logical_hops);
     auto found = route_metrics.find(key);
     if (found == route_metrics.end()) {
         found = route_metrics.emplace(
-            key, RouteMetrics{route_class, hops, 0, 0, 0, 0, 0}).first;
+            key, RouteMetrics{route_class, logical_hops, physical_edges,
+                              0, 0, 0, 0, 0}).first;
+    } else {
+        assert(found->second.physical_edges == physical_edges);
     }
     auto& metric = found->second;
     metric.messages++;
     metric.payload_bytes += chunk_size;
-    metric.byte_hops += chunk_size * static_cast<uint64_t>(hops);
+    metric.byte_hops += chunk_size * static_cast<uint64_t>(physical_edges);
     metric.propagation_time += propagation_time;
     metric.serialization_time += serialization_time;
 }

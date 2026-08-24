@@ -145,6 +145,10 @@ class Topology {
     void instantiate_devices() noexcept;
 
     void record_route(const Route& route, ChunkSize chunk_size) noexcept;
+    void record_route_metrics(RouteClass route_class, int logical_hops,
+                              int physical_edges, ChunkSize chunk_size,
+                              EventTime propagation_time,
+                              EventTime serialization_time) noexcept;
 
     /**
      * Connect src -> dest with the given bandwidth and latency.

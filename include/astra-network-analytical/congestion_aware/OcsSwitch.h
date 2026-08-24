@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 #include <map>
 #include <memory>
 #include <iosfwd>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -38,9 +39,14 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] uint64_t get_scheduled_bytes() const noexcept;
     [[nodiscard]] uint64_t get_transmitted_bytes() const noexcept;
     [[nodiscard]] EventTime get_reconfiguration_time() const noexcept;
+    [[nodiscard]] EventTime get_max_plane_reconfiguration_time() const noexcept;
+    [[nodiscard]] EventTime get_critical_plane_reconfiguration_time() const noexcept;
+    [[nodiscard]] EventTime get_plane_schedule_makespan() const noexcept;
     [[nodiscard]] EventTime get_circuit_wait_time() const noexcept;
     [[nodiscard]] EventTime get_max_circuit_wait_time() const noexcept;
     [[nodiscard]] uint64_t get_circuit_transmissions() const noexcept;
+    [[nodiscard]] int get_max_active_ports(DeviceId endpoint) const noexcept;
+    [[nodiscard]] int get_max_distinct_peers(DeviceId endpoint) const noexcept;
     [[nodiscard]] const std::vector<int>& get_logical_to_physical() const noexcept;
 
   private:
@@ -56,6 +62,7 @@ class OcsSwitch final : public BasicTopology {
     struct Configuration {
         int plane;
         int stream;
+        bool force_reconfiguration;
         std::vector<Pair> matching;
         std::vector<Circuit> circuits;
     };
@@ -67,17 +74,37 @@ class OcsSwitch final : public BasicTopology {
         int completed = 0;
         int reconfigurations = 0;
         EventTime reconfiguration_time = 0;
+        EventTime data_time = 0;
+    };
+
+    struct PlaneStripe {
+        int plane;
+        ChunkSize bytes;
     };
 
     struct RuntimeAssignment {
-        int plane;
+        bool direct;
+        std::vector<PlaneStripe> stripes;
         EventTime not_before;
         int request_id;
     };
 
+    struct LogicalTransfer {
+        std::unique_ptr<Chunk> chunk;
+        Pair pair;
+        int stream;
+        EventTime queued_at;
+        int remaining_stripes;
+    };
+
+    struct PendingStripe {
+        std::shared_ptr<LogicalTransfer> transfer;
+        ChunkSize bytes;
+    };
+
     struct Transmission {
         OcsSwitch* topology;
-        std::unique_ptr<Chunk> chunk;
+        std::shared_ptr<LogicalTransfer> transfer;
         int plane;
         Pair pair;
         ChunkSize bytes;
@@ -109,8 +136,9 @@ class OcsSwitch final : public BasicTopology {
     std::map<Pair, LinkId> base_ports;
     std::vector<int> logical_to_physical;
     std::vector<int> physical_to_logical;
+    std::vector<int> plan_dimensions;
     std::map<std::tuple<int, DeviceId, DeviceId, int>,
-             std::deque<std::unique_ptr<Chunk>>> pending;
+             std::deque<PendingStripe>> pending;
     mutable std::map<AssignmentKey, std::deque<RuntimeAssignment>> route_assignments;
     mutable std::map<AssignmentKey, std::deque<RuntimeAssignment>> dispatch_assignments;
     std::map<std::pair<DeviceId, LinkId>, LinkMetrics> physical_metrics;
@@ -130,6 +158,18 @@ class OcsSwitch final : public BasicTopology {
     EventTime max_release_slip_planned;
     EventTime max_release_slip_actual;
     std::vector<std::tuple<int, EventTime, EventTime>> release_records;
+    std::vector<std::map<int, int>> active_endpoint_planes;
+    std::vector<std::map<int, int>> active_endpoint_tx_planes;
+    std::vector<std::map<int, int>> active_endpoint_rx_planes;
+    std::vector<std::map<DeviceId, int>> active_endpoint_peers;
+    std::vector<std::map<DeviceId, int>> active_endpoint_tx_peers;
+    std::vector<std::map<DeviceId, int>> active_endpoint_rx_peers;
+    std::vector<int> max_active_endpoint_ports;
+    std::vector<int> max_active_endpoint_tx_ports;
+    std::vector<int> max_active_endpoint_rx_ports;
+    std::vector<int> max_distinct_endpoint_peers;
+    std::vector<int> max_distinct_endpoint_tx_peers;
+    std::vector<int> max_distinct_endpoint_rx_peers;
 
     void load_plan(const std::string& path) noexcept;
     void validate_plan() const noexcept;
@@ -145,7 +185,7 @@ class OcsSwitch final : public BasicTopology {
                                   int plane) const noexcept;
     void try_start_transmissions(int plane) noexcept;
     void start_transmission(int plane, Circuit& circuit,
-                            std::unique_ptr<Chunk> chunk) noexcept;
+                            PendingStripe stripe) noexcept;
     void finish_serialization(Transmission* transmission) noexcept;
     void finish_arrival(Transmission* transmission) noexcept;
     void advance_configuration(int plane) noexcept;
