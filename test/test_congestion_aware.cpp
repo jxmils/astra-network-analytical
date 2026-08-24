@@ -264,6 +264,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfigu
     EXPECT_EQ(topology.get_circuit_wait_time(), 101);
     EXPECT_EQ(topology.get_max_circuit_wait_time(), 101);
     EXPECT_EQ(topology.get_circuit_transmissions(), 3);
+    EXPECT_EQ(topology.get_plane_schedule_makespan(), 195);
     std::remove(plan.c_str());
 }
 
@@ -302,6 +303,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(topology.get_scheduled_bytes(), 100);
     EXPECT_EQ(topology.get_transmitted_bytes(), 100);
     EXPECT_EQ(topology.get_circuit_transmissions(), 2);
+    EXPECT_EQ(topology.get_plane_schedule_makespan(), 47);
     EXPECT_EQ(topology.get_max_active_ports(0), 2);
     EXPECT_EQ(topology.get_max_distinct_peers(0), 1);
     const auto routes = topology.get_route_metrics();

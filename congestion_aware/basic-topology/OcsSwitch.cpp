@@ -219,8 +219,16 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
                 if (configuration.plane < 0 || configuration.plane >= planes) {
                     reject_ocs("configuration references an unavailable plane");
                 }
-                plane_states[configuration.plane].configurations.push_back(
-                    std::move(configuration));
+                auto configuration_bytes = uint64_t{0};
+                for (const auto& circuit : configuration.circuits) {
+                    configuration_bytes = std::max(
+                        configuration_bytes, circuit.bytes);
+                }
+                auto& state = plane_states[configuration.plane];
+                state.data_time += positive_event_delay(
+                    static_cast<double>(configuration_bytes) /
+                    bw_GBps_to_Bpns(plan_bandwidth));
+                state.configurations.push_back(std::move(configuration));
             }
         }
     } catch (const YAML::Exception& error) {
@@ -504,7 +512,6 @@ void OcsSwitch::start_transmission(const int plane, Circuit& circuit,
     circuit_wait_time += wait;
     max_circuit_wait_time = std::max(max_circuit_wait_time, wait);
     ++circuit_transmissions;
-    plane_states[plane].data_time += serialization;
     ++active_endpoint_planes[source][plane];
     ++active_endpoint_planes[destination][plane];
     ++active_endpoint_tx_planes[source][plane];
