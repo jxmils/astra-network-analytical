@@ -15,6 +15,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Mesh3D.h"
 #include "congestion_aware/MultiPlaneSwitch.h"
 #include "congestion_aware/OcsSwitch.h"
+#include "congestion_aware/StaticCompletion.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdio>
@@ -122,6 +123,24 @@ std::string write_ocs_test_plan(const std::string& name,
     {"index": 1, "configurations": [
       {"plane": 0, "stream": 0, "matching": [[0, 2]], "circuits": [{"source": 0, "destination": 2, "bytes": 100}]}
     ]}
+  ]
+})";
+    output.close();
+    return path;
+}
+
+std::string write_static_completion_test_plan() {
+    const auto path = "/tmp/analytical-static-completion.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-static-completion",
+  "version": 1,
+  "endpoints": 16,
+  "matchings": [
+    [[0, 10], [1, 11], [2, 8], [3, 9],
+     [4, 14], [5, 15], [6, 12], [7, 13]],
+    [[0, 5], [1, 6], [2, 7], [3, 4],
+     [8, 13], [9, 14], [10, 15], [11, 12]]
   ]
 })";
     output.close();
@@ -815,6 +834,64 @@ TEST_F(TestNetworkAnalyticalCongestionAware, ExtraLinkLatencyChangesPhysicalArri
     const auto switch_two = measure(Hybrid2D::ExtraFabric::Switch, 2'000.0, 15);
     EXPECT_EQ(switch_one - switch_zero, 2'000);
     EXPECT_EQ(switch_two - switch_one, 2'000);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       StaticCompletionHasExactPortsAndPhysicalOpticalHops) {
+    const auto plan = write_static_completion_test_plan();
+    const auto topology = StaticCompletion(16, 1.0, 5.0, 1.0, 5.0, plan);
+    const auto metrics = topology.get_link_metrics();
+
+    EXPECT_EQ(count_links(metrics, LinkClass::BaseMesh), 4 * 16);
+    EXPECT_EQ(count_links(metrics, LinkClass::SwitchUplink), 4 * 16);
+    for (auto endpoint = 0; endpoint < 16; ++endpoint) {
+        const auto device = topology.route(endpoint, endpoint).front();
+        EXPECT_EQ(device->get_connected_device_ids().size(), 6);
+    }
+
+    const auto optical_route = topology.route(0, 10, 100);
+    EXPECT_EQ(route_ids(optical_route), std::vector<DeviceId>({0, 16, 10}));
+    EXPECT_EQ(route_link_classes(optical_route),
+              std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+    EXPECT_EQ(std::remove(plan.c_str()), 0);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       StaticCompletionRoutesAreValidAndDeterministic) {
+    const auto plan = write_static_completion_test_plan();
+    const auto topology = StaticCompletion(
+        16, 200.0, 1'000.0, 200.0, 1'000.0, plan);
+    for (auto source = 0; source < 16; ++source) {
+        for (auto destination = 0; destination < 16; ++destination) {
+            const auto first = topology.route(source, destination, chunk_size);
+            const auto second = topology.route(source, destination, chunk_size);
+            EXPECT_EQ(route_ids(first), route_ids(second));
+            EXPECT_EQ(route_ids(first).front(), source);
+            EXPECT_EQ(route_ids(first).back(), destination);
+            route_link_classes(first);
+        }
+    }
+    EXPECT_EQ(std::remove(plan.c_str()), 0);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       StaticCompletionChargesBothOpticalLegLatencies) {
+    const auto measure = [this](const Latency leg_latency) {
+        event_queue = std::make_shared<EventQueue>();
+        Topology::set_event_queue(event_queue);
+        const auto plan = write_static_completion_test_plan();
+        auto topology = StaticCompletion(16, 1.0, 0.0, 1.0, leg_latency, plan);
+        auto observation = ArrivalObservation{event_queue};
+        topology.send(std::make_unique<Chunk>(
+            100, topology.route(0, 10, 100), record_arrival, &observation));
+        while (!event_queue->finished()) {
+            event_queue->proceed();
+        }
+        EXPECT_EQ(std::remove(plan.c_str()), 0);
+        return observation.arrival_time;
+    };
+
+    EXPECT_EQ(measure(5.0) - measure(0.0), 10);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, MeshAndTorusGraphStructure) {

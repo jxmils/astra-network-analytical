@@ -14,6 +14,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/OcsSwitch.h"
 #include "congestion_aware/Ring.h"
 #include "congestion_aware/Switch.h"
+#include "congestion_aware/StaticCompletion.h"
 #include <cstdlib>
 #include <iostream>
 
@@ -147,6 +148,10 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::TorusOcsQtp:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true, true);
+    case TopologyBuildingBlock::TorusStaticCompletion2D:
+        return std::make_shared<StaticCompletion>(
+            npus_count, bandwidth, latency, extra_bandwidth, extra_latency,
+            routing_plan_path);
     case TopologyBuildingBlock::HierarchicalCluster:
         return std::make_shared<HierarchicalCluster>(
             npus_count, bandwidth, latency, extra_bandwidth, extra_latency,
