@@ -234,6 +234,42 @@ std::string write_qtp_ocs_test_plan() {
     return path;
 }
 
+std::string write_synchronized_ocs_test_plan() {
+    const auto path = "/tmp/analytical-synchronized-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 2,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+    {"source": 2, "destination": 3, "bytes": 100, "stream": 0,
+     "route": "OCS1", "stripes": [{"plane": 1, "bytes": 100}]},
+    {"source": 0, "destination": 1, "bytes": 200, "stream": 1,
+     "route": "OCS0", "stripes": [{"plane": 0, "bytes": 200}]},
+    {"source": 4, "destination": 5, "bytes": 100, "stream": 2,
+     "route": "OCS1", "stripes": [{"plane": 1, "bytes": 100}]}
+  ],
+  "rounds": [
+    {"index": 0, "synchronize": true, "configurations": [
+      {"plane": 0, "stream": 0, "matching": [[0, 1]], "circuits": []},
+      {"plane": 1, "stream": 0, "matching": [[2, 3]],
+       "circuits": [{"source": 2, "destination": 3, "bytes": 100}]}
+    ]},
+    {"index": 1, "configurations": [
+      {"plane": 0, "stream": 1, "matching": [[0, 1]],
+       "circuits": [{"source": 0, "destination": 1, "bytes": 200}]}
+    ]},
+    {"index": 2, "synchronize": true, "configurations": [
+      {"plane": 0, "stream": 2, "matching": [[6, 7]], "circuits": []},
+      {"plane": 1, "stream": 2, "matching": [[4, 5]],
+       "circuits": [{"source": 4, "destination": 5, "bytes": 100}]}
+    ]}
+  ]
+})";
+    output.close();
+    return path;
+}
+
 }  // namespace
 
 TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfiguration) {
@@ -404,6 +440,40 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(topology.get_completed_rounds(), 4);
     EXPECT_EQ(topology.get_reconfiguration_count(), 1);
     EXPECT_EQ(topology.get_reconfiguration_time(), 7);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       OcsSynchronizedRoundWaitsAndInstallsIdlePlane) {
+    const auto plan = write_synchronized_ocs_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 2, true);
+    auto first_plane_one = ArrivalObservation{event_queue};
+    auto long_plane_zero = ArrivalObservation{event_queue};
+    auto second_plane_one = ArrivalObservation{event_queue};
+
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(2, 3, 100, 0), 0,
+        record_arrival, &first_plane_one));
+    topology.send(std::make_unique<Chunk>(
+        200, topology.route(0, 1, 200, 1), 1,
+        record_arrival, &long_plane_zero));
+    topology.send(std::make_unique<Chunk>(
+        100, topology.route(4, 5, 100, 2), 2,
+        record_arrival, &second_plane_one));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(first_plane_one.arrival_time, 104);
+    EXPECT_EQ(long_plane_zero.arrival_time, 197);
+    EXPECT_EQ(second_plane_one.arrival_time, 298);
+    EXPECT_GT(second_plane_one.arrival_time, long_plane_zero.arrival_time);
+    EXPECT_EQ(topology.get_completed_rounds(), 5);
+    EXPECT_EQ(topology.get_reconfiguration_count(), 2);
+    EXPECT_EQ(topology.get_reconfiguration_time(), 14);
+    EXPECT_EQ(topology.get_max_plane_reconfiguration_time(), 7);
+    EXPECT_EQ(topology.get_scheduled_bytes(), 400);
+    EXPECT_EQ(topology.get_transmitted_bytes(), 400);
     std::remove(plan.c_str());
 }
 

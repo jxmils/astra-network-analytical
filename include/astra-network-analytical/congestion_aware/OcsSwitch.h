@@ -63,6 +63,8 @@ class OcsSwitch final : public BasicTopology {
         int plane;
         int stream;
         bool force_reconfiguration;
+        int round;
+        bool synchronize;
         std::vector<Pair> matching;
         std::vector<Circuit> circuits;
     };
@@ -71,10 +73,13 @@ class OcsSwitch final : public BasicTopology {
         std::vector<Configuration> configurations;
         std::size_t current = 0;
         bool reconfiguring = false;
+        bool activated = false;
+        bool has_installed_matching = false;
         int completed = 0;
         int reconfigurations = 0;
         EventTime reconfiguration_time = 0;
         EventTime data_time = 0;
+        std::vector<Pair> installed_matching;
     };
 
     struct PlaneStripe {
@@ -179,6 +184,8 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] int step_towards(int current, int target, int extent,
                                    bool tie_backward) const noexcept;
     void start_initial_planes() noexcept;
+    void activate_configuration(int plane) noexcept;
+    void try_activate_synchronized_round(int round) noexcept;
     void dispatch(std::unique_ptr<Chunk> chunk,
                   const RuntimeAssignment& assignment) noexcept;
     [[nodiscard]] Route ocs_route(DeviceId src, DeviceId dest,
@@ -190,8 +197,8 @@ class OcsSwitch final : public BasicTopology {
     void finish_arrival(Transmission* transmission) noexcept;
     void advance_configuration(int plane) noexcept;
     [[nodiscard]] bool configuration_complete(int plane) const noexcept;
-    [[nodiscard]] bool configuration_changed(const Configuration& first,
-                                             const Configuration& second) const noexcept;
+    [[nodiscard]] bool matching_changed(const std::vector<Pair>& first,
+                                        const std::vector<Pair>& second) const noexcept;
     [[nodiscard]] Circuit* find_circuit(int plane, const Pair& pair) noexcept;
 
     static void serialization_callback(void* argument) noexcept;

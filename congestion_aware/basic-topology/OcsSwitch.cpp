@@ -186,9 +186,13 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
         }
         auto expected_round = 0;
         for (const auto& round_node : root["rounds"]) {
-            if (round_node["index"].as<int>() != expected_round++) {
+            const auto round = round_node["index"].as<int>();
+            if (round != expected_round++) {
                 reject_ocs("plan round indices are not contiguous");
             }
+            const auto synchronize = round_node["synchronize"]
+                                         ? round_node["synchronize"].as<bool>()
+                                         : false;
             for (const auto& configuration_node : round_node["configurations"]) {
                 auto configuration = Configuration{
                     configuration_node["plane"].as<int>(),
@@ -196,6 +200,8 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
                     configuration_node["force_reconfiguration"]
                         ? configuration_node["force_reconfiguration"].as<bool>()
                         : false,
+                    round,
+                    synchronize,
                     {}, {}};
                 if (!configuration_node["matching"] ||
                     !configuration_node["matching"].IsSequence()) {
@@ -289,9 +295,6 @@ void OcsSwitch::validate_plan() const noexcept {
             }
             if (support.empty()) {
                 reject_ocs("installed matching must not be empty");
-            }
-            if (configuration.circuits.empty()) {
-                reject_ocs("plane configuration must transmit at least one circuit");
             }
             for (const auto& circuit : configuration.circuits) {
                 if (circuit.bytes == 0 || support.find(circuit.pair) == support.end()) {
@@ -442,18 +445,69 @@ void OcsSwitch::start_initial_planes() noexcept {
         if (state.configurations.empty()) {
             continue;
         }
-        if (!initial_reconfiguration || reconfiguration_ns == 0) {
-            try_start_transmissions(plane);
+        if (!state.configurations[state.current].synchronize) {
+            activate_configuration(plane);
+        }
+    }
+    for (auto plane = 0; plane < planes; ++plane) {
+        const auto& state = plane_states[plane];
+        if (!state.configurations.empty() &&
+            state.configurations[state.current].synchronize) {
+            try_activate_synchronized_round(
+                state.configurations[state.current].round);
+        }
+    }
+}
+
+void OcsSwitch::activate_configuration(const int plane) noexcept {
+    auto& state = plane_states[plane];
+    if (state.current >= state.configurations.size() || state.activated) {
+        return;
+    }
+    const auto& configuration = state.configurations[state.current];
+    const auto changed = state.has_installed_matching && matching_changed(
+        state.installed_matching, configuration.matching);
+    const auto charge = (!state.has_installed_matching
+                             ? initial_reconfiguration
+                             : configuration.force_reconfiguration || changed);
+    state.installed_matching = configuration.matching;
+    state.has_installed_matching = true;
+    state.activated = true;
+    if (!charge || reconfiguration_ns == 0) {
+        try_start_transmissions(plane);
+        if (configuration_complete(plane)) {
+            advance_configuration(plane);
+        }
+        return;
+    }
+    state.reconfiguring = true;
+    ++state.reconfigurations;
+    ++reconfiguration_count;
+    const auto delay = positive_event_delay(reconfiguration_ns);
+    state.reconfiguration_time += delay;
+    auto* callback = new PlaneCallback{this, plane};
+    event_queue->schedule_event(event_queue->get_current_time() + delay,
+                                reconfiguration_callback, callback);
+}
+
+void OcsSwitch::try_activate_synchronized_round(const int round) noexcept {
+    auto participants = std::vector<int>();
+    for (auto plane = 0; plane < planes; ++plane) {
+        const auto& state = plane_states[plane];
+        const auto planned = std::find_if(
+            state.configurations.begin(), state.configurations.end(),
+            [round](const Configuration& item) { return item.round == round; });
+        if (planned == state.configurations.end()) {
             continue;
         }
-        state.reconfiguring = true;
-        ++state.reconfigurations;
-        ++reconfiguration_count;
-        const auto delay = positive_event_delay(reconfiguration_ns);
-        state.reconfiguration_time += delay;
-        auto* callback = new PlaneCallback{this, plane};
-        event_queue->schedule_event(event_queue->get_current_time() + delay,
-                                    reconfiguration_callback, callback);
+        participants.push_back(plane);
+        if (state.current >= state.configurations.size() ||
+            state.configurations[state.current].round != round) {
+            return;
+        }
+    }
+    for (const auto plane : participants) {
+        activate_configuration(plane);
     }
 }
 
@@ -473,7 +527,8 @@ OcsSwitch::Circuit* OcsSwitch::find_circuit(const int plane,
 
 void OcsSwitch::try_start_transmissions(const int plane) noexcept {
     auto& state = plane_states[plane];
-    if (state.reconfiguring || state.current >= state.configurations.size()) {
+    if (state.reconfiguring || !state.activated ||
+        state.current >= state.configurations.size()) {
         return;
     }
     auto progress = true;
@@ -577,6 +632,9 @@ void OcsSwitch::reconfiguration_callback(void* argument) noexcept {
     auto& state = callback->topology->plane_states[callback->plane];
     state.reconfiguring = false;
     callback->topology->try_start_transmissions(callback->plane);
+    if (callback->topology->configuration_complete(callback->plane)) {
+        callback->topology->advance_configuration(callback->plane);
+    }
 }
 
 void OcsSwitch::finish_serialization(Transmission* transmission) noexcept {
@@ -630,7 +688,8 @@ void OcsSwitch::finish_arrival(Transmission* transmission) noexcept {
 
 bool OcsSwitch::configuration_complete(const int plane) const noexcept {
     const auto& state = plane_states[plane];
-    if (state.current >= state.configurations.size()) {
+    if (!state.activated || state.reconfiguring ||
+        state.current >= state.configurations.size()) {
         return false;
     }
     for (const auto& circuit : state.configurations[state.current].circuits) {
@@ -641,10 +700,10 @@ bool OcsSwitch::configuration_complete(const int plane) const noexcept {
     return true;
 }
 
-bool OcsSwitch::configuration_changed(const Configuration& first,
-                                      const Configuration& second) const noexcept {
-    auto first_matching = first.matching;
-    auto second_matching = second.matching;
+bool OcsSwitch::matching_changed(const std::vector<Pair>& first,
+                                 const std::vector<Pair>& second) const noexcept {
+    auto first_matching = first;
+    auto second_matching = second;
     std::sort(first_matching.begin(), first_matching.end());
     std::sort(second_matching.begin(), second_matching.end());
     return first_matching != second_matching;
@@ -652,29 +711,17 @@ bool OcsSwitch::configuration_changed(const Configuration& first,
 
 void OcsSwitch::advance_configuration(const int plane) noexcept {
     auto& state = plane_states[plane];
-    const auto previous = state.current;
     ++state.current;
     ++state.completed;
+    state.activated = false;
     if (state.current >= state.configurations.size()) {
         return;
     }
-    if (state.configurations[state.current].force_reconfiguration ||
-        configuration_changed(state.configurations[previous],
-                              state.configurations[state.current])) {
-        ++state.reconfigurations;
-        ++reconfiguration_count;
-        if (reconfiguration_ns == 0) {
-            try_start_transmissions(plane);
-            return;
-        }
-        state.reconfiguring = true;
-        const auto delay = positive_event_delay(reconfiguration_ns);
-        state.reconfiguration_time += delay;
-        auto* callback = new PlaneCallback{this, plane};
-        event_queue->schedule_event(event_queue->get_current_time() + delay,
-                                    reconfiguration_callback, callback);
+    const auto& following = state.configurations[state.current];
+    if (following.synchronize) {
+        try_activate_synchronized_round(following.round);
     } else {
-        try_start_transmissions(plane);
+        activate_configuration(plane);
     }
 }
 
