@@ -151,6 +151,31 @@ std::string write_hybrid_ocs_test_plan() {
     return path;
 }
 
+std::string write_hybrid_escape_test_plan() {
+    const auto path = "/tmp/analytical-torus-ocs-escape.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 2,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "direct_escape_factor": 1.0,
+  "assignments": [
+    {"source": 0, "destination": 10, "bytes": 800, "stream": 0,
+     "route": "OCS", "allow_direct_escape": true, "target_round": 0,
+     "stripes": [{"plane": 0, "bytes": 800}]},
+    {"source": 0, "destination": 10, "bytes": 100, "stream": 1,
+     "route": "OCS", "allow_direct_escape": true, "target_round": 0,
+     "stripes": [{"plane": 0, "bytes": 100}]}
+  ],
+  "rounds": [{"index": 0, "configurations": [
+    {"plane": 0, "stream": -1, "matching": [[0, 10]],
+     "circuits": [{"source": 0, "destination": 10, "bytes": 900}]}
+  ]}]
+})";
+    output.close();
+    return path;
+}
+
 std::string write_striped_ocs_test_plan() {
     const auto path = "/tmp/analytical-striped-ocs.json";
     auto output = std::ofstream(path);
@@ -405,6 +430,38 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) 
     EXPECT_EQ(topology.get_transmitted_bytes(), 200);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 64);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink), 64);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       PersistentOcsEscapesARequestAndConsumesItsCircuitQuota) {
+    const auto plan = write_hybrid_escape_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 2, true);
+    auto optical = ArrivalObservation{event_queue};
+    auto escaped = ArrivalObservation{event_queue};
+
+    const auto optical_route = topology.route(0, 10, 800, 0);
+    EXPECT_EQ(route_link_classes(optical_route),
+              std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+    topology.send(std::make_unique<Chunk>(
+        800, optical_route, 0, record_arrival, &optical));
+
+    const auto escaped_route = topology.route(0, 10, 100, 1);
+    EXPECT_EQ(route_link_classes(escaped_route),
+              std::vector<LinkClass>(4, LinkClass::BaseMesh));
+    topology.send(std::make_unique<Chunk>(
+        100, escaped_route, 1, record_arrival, &escaped));
+
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+
+    EXPECT_EQ(topology.get_scheduled_bytes(), 900);
+    EXPECT_EQ(topology.get_transmitted_bytes(), 800);
+    EXPECT_EQ(topology.get_escaped_bytes(), 100);
+    EXPECT_EQ(topology.get_escaped_assignments(), 1);
+    EXPECT_EQ(topology.get_completed_rounds(), 1);
+    EXPECT_LT(escaped.arrival_time, optical.arrival_time);
     std::remove(plan.c_str());
 }
 

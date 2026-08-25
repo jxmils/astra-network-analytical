@@ -38,6 +38,8 @@ class OcsSwitch final : public BasicTopology {
     [[nodiscard]] int get_reconfiguration_count() const noexcept;
     [[nodiscard]] uint64_t get_scheduled_bytes() const noexcept;
     [[nodiscard]] uint64_t get_transmitted_bytes() const noexcept;
+    [[nodiscard]] uint64_t get_escaped_bytes() const noexcept;
+    [[nodiscard]] uint64_t get_escaped_assignments() const noexcept;
     [[nodiscard]] EventTime get_reconfiguration_time() const noexcept;
     [[nodiscard]] EventTime get_max_plane_reconfiguration_time() const noexcept;
     [[nodiscard]] EventTime get_critical_plane_reconfiguration_time() const noexcept;
@@ -57,6 +59,7 @@ class OcsSwitch final : public BasicTopology {
         uint64_t bytes;
         uint64_t remaining;
         bool busy;
+        ChunkSize busy_bytes;
     };
 
     struct Configuration {
@@ -92,6 +95,8 @@ class OcsSwitch final : public BasicTopology {
         std::vector<PlaneStripe> stripes;
         EventTime not_before;
         int request_id;
+        bool allow_direct_escape;
+        int target_round;
     };
 
     struct LogicalTransfer {
@@ -134,6 +139,7 @@ class OcsSwitch final : public BasicTopology {
     double plan_bandwidth;
     double propagation_ns;
     double reconfiguration_ns;
+    double direct_escape_factor;
     bool initial_reconfiguration;
     std::vector<PlaneState> plane_states;
     std::vector<std::vector<LinkId>> to_switch_ports;
@@ -152,6 +158,8 @@ class OcsSwitch final : public BasicTopology {
     int reconfiguration_count;
     uint64_t scheduled_bytes;
     uint64_t transmitted_bytes;
+    mutable uint64_t escaped_bytes;
+    mutable uint64_t escaped_assignments;
     EventTime circuit_wait_time;
     EventTime max_circuit_wait_time;
     uint64_t circuit_transmissions;
@@ -190,6 +198,16 @@ class OcsSwitch final : public BasicTopology {
                   const RuntimeAssignment& assignment) noexcept;
     [[nodiscard]] Route ocs_route(DeviceId src, DeviceId dest,
                                   int plane) const noexcept;
+    [[nodiscard]] double direct_path_cost(DeviceId src, DeviceId dest,
+                                          ChunkSize bytes) const noexcept;
+    [[nodiscard]] double optical_path_cost(DeviceId src, DeviceId dest,
+                                           ChunkSize bytes,
+                                           const RuntimeAssignment& assignment) const noexcept;
+    [[nodiscard]] bool should_escape_direct(DeviceId src, DeviceId dest,
+                                            ChunkSize bytes,
+                                            const RuntimeAssignment& assignment) const noexcept;
+    void consume_escaped_quota(DeviceId src, DeviceId dest,
+                               const RuntimeAssignment& assignment) noexcept;
     void try_start_transmissions(int plane) noexcept;
     void start_transmission(int plane, Circuit& circuit,
                             PendingStripe stripe) noexcept;

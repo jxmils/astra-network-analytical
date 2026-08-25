@@ -41,8 +41,10 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       qtp_embedding(qtp_embedding),
       width(static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))))),
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
+      direct_escape_factor(1.0),
       initial_reconfiguration(false), epoch_started(false), epoch_start(0),
       reconfiguration_count(0), scheduled_bytes(0), transmitted_bytes(0),
+      escaped_bytes(0), escaped_assignments(0),
       circuit_wait_time(0), max_circuit_wait_time(0), circuit_transmissions(0),
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
       max_release_slip(0), max_release_slip_request(-1),
@@ -130,6 +132,9 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
         plan_bandwidth = root["link_bandwidth_GBps"].as<double>();
         propagation_ns = root["propagation_ns"].as<double>();
         reconfiguration_ns = root["reconfiguration_ns"].as<double>();
+        direct_escape_factor = root["direct_escape_factor"]
+                                   ? root["direct_escape_factor"].as<double>()
+                                   : 1.0;
         initial_reconfiguration = root["initial_reconfiguration"].as<bool>();
         if (root["logical_dimensions"] && root["logical_dimensions"].IsSequence()) {
             for (const auto& extent : root["logical_dimensions"]) {
@@ -151,12 +156,20 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
             const auto not_before = assignment["not_before_ns"]
                                         ? assignment["not_before_ns"].as<EventTime>()
                                         : 0;
+            const auto allow_direct_escape = assignment["allow_direct_escape"]
+                                                 ? assignment["allow_direct_escape"].as<bool>()
+                                                 : false;
+            const auto target_round = assignment["target_round"]
+                                          ? assignment["target_round"].as<int>()
+                                          : -1;
+            const auto direct = route == "DIRECT";
             if (source < 0 || source >= npus_count || destination < 0 ||
                 destination >= npus_count || source == destination || bytes == 0 ||
-                stream < 0 || request_id < -1 || not_before < 0) {
+                stream < 0 || request_id < -1 || not_before < 0 ||
+                target_round < -1 ||
+                (allow_direct_escape && (direct || target_round < 0))) {
                 reject_ocs("invalid route assignment");
             }
-            const auto direct = route == "DIRECT";
             if (!direct && route.rfind("OCS", 0) != 0) {
                 reject_ocs("invalid route assignment");
             }
@@ -182,7 +195,8 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
                 }
             }
             route_assignments[{source, destination, bytes, stream}].push_back(
-                RuntimeAssignment{direct, std::move(stripes), not_before, request_id});
+                RuntimeAssignment{direct, std::move(stripes), not_before, request_id,
+                                  allow_direct_escape, target_round});
             ++planned_assignments;
         }
         auto expected_round = 0;
@@ -220,7 +234,7 @@ void OcsSwitch::load_plan(const std::string& path) noexcept {
                     const auto destination = circuit_node["destination"].as<int>();
                     const auto bytes = circuit_node["bytes"].as<uint64_t>();
                     configuration.circuits.push_back(
-                        Circuit{{source, destination}, bytes, bytes, false});
+                        Circuit{{source, destination}, bytes, bytes, false, 0});
                     scheduled_bytes += bytes;
                 }
                 if (configuration.plane < 0 || configuration.plane >= planes) {
@@ -261,7 +275,7 @@ void OcsSwitch::validate_plan() const noexcept {
     if (qtp_embedding && npus_count != 64) {
         reject_ocs("QTP embedding requires exactly 64 endpoints");
     }
-    if (reconfiguration_ns < 0) {
+    if (reconfiguration_ns < 0 || direct_escape_factor <= 0) {
         reject_ocs("reconfiguration latency must be nonnegative");
     }
     if (!plan_dimensions.empty()) {
@@ -330,8 +344,14 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
                    " size " + std::to_string(chunk_size) + " stream " +
                    std::to_string(stream));
     }
-    const auto assignment = found->second.front();
+    auto assignment = found->second.front();
     found->second.pop_front();
+    if (assignment.allow_direct_escape &&
+        should_escape_direct(src, dest, chunk_size, assignment)) {
+        assignment.direct = true;
+        escaped_bytes += chunk_size;
+        ++escaped_assignments;
+    }
     dispatch_assignments[key].push_back(assignment);
     ++consumed_assignments;
     if (assignment.direct) {
@@ -353,6 +373,104 @@ Route OcsSwitch::ocs_route(const DeviceId src, const DeviceId dest,
     path.emplace_back(devices[npus_count + plane], from_switch_ports[plane][dest]);
     path.emplace_back(devices[dest]);
     return path;
+}
+
+double OcsSwitch::direct_path_cost(const DeviceId src, const DeviceId dest,
+                                   const ChunkSize bytes) const noexcept {
+    const auto path = direct_route(src, dest);
+    auto latency_cost = 0.0;
+    auto serialization_cost = 0.0;
+    auto current = path.begin();
+    auto next = std::next(current);
+    while (next != path.end()) {
+        const auto link = current->outgoing_link;
+        const auto queued = current->device->get_outstanding_bytes(link);
+        const auto bandwidth_Bpns = bw_GBps_to_Bpns(
+            current->device->get_link_bandwidth(link));
+        latency_cost += current->device->get_link_latency(link);
+        serialization_cost = std::max(
+            serialization_cost,
+            (static_cast<double>(queued) + static_cast<double>(bytes)) /
+                bandwidth_Bpns);
+        ++current;
+        ++next;
+    }
+    return latency_cost + serialization_cost;
+}
+
+double OcsSwitch::optical_path_cost(
+    const DeviceId src, const DeviceId dest, const ChunkSize bytes,
+    const RuntimeAssignment& assignment) const noexcept {
+    if (assignment.stripes.size() != 1 || assignment.target_round < 0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const auto plane = assignment.stripes.front().plane;
+    const auto& state = plane_states[plane];
+    auto target_index = state.configurations.size();
+    for (auto index = state.current; index < state.configurations.size(); ++index) {
+        if (state.configurations[index].round == assignment.target_round) {
+            target_index = index;
+            break;
+        }
+    }
+    if (target_index == state.configurations.size()) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const auto bandwidth_Bpns = bw_GBps_to_Bpns(plan_bandwidth);
+    auto wait = 0.0;
+    if (state.reconfiguring) {
+        wait += reconfiguration_ns;
+    } else if (!state.has_installed_matching && initial_reconfiguration) {
+        wait += reconfiguration_ns;
+    }
+    for (auto index = state.current; index < target_index; ++index) {
+        auto maximum_remaining = uint64_t{0};
+        for (const auto& circuit : state.configurations[index].circuits) {
+            maximum_remaining = std::max(maximum_remaining, circuit.remaining);
+        }
+        wait += static_cast<double>(maximum_remaining) / bandwidth_Bpns;
+        if (matching_changed(state.configurations[index].matching,
+                             state.configurations[index + 1].matching) ||
+            state.configurations[index + 1].force_reconfiguration) {
+            wait += reconfiguration_ns;
+        }
+    }
+
+    auto queued_bytes = uint64_t{0};
+    const auto pair = Pair{src, dest};
+    const auto& target = state.configurations[target_index];
+    const auto circuit = std::find_if(
+        target.circuits.begin(), target.circuits.end(),
+        [&pair](const Circuit& item) { return item.pair == pair; });
+    if (circuit == target.circuits.end()) {
+        return std::numeric_limits<double>::infinity();
+    }
+    if (target_index == state.current && circuit->busy) {
+        queued_bytes += circuit->busy_bytes;
+    }
+    for (const auto& [key, requests] : pending) {
+        if (std::get<0>(key) != plane || std::get<1>(key) != src ||
+            std::get<2>(key) != dest) {
+            continue;
+        }
+        for (const auto& request : requests) {
+            queued_bytes += request.bytes;
+        }
+    }
+    return wait + propagation_ns +
+           static_cast<double>(queued_bytes + bytes) / bandwidth_Bpns;
+}
+
+bool OcsSwitch::should_escape_direct(
+    const DeviceId src, const DeviceId dest, const ChunkSize bytes,
+    const RuntimeAssignment& assignment) const noexcept {
+    if (!base_torus) {
+        return false;
+    }
+    const auto direct_cost = direct_path_cost(src, dest, bytes);
+    const auto optical_cost = optical_path_cost(src, dest, bytes, assignment);
+    return optical_cost >= direct_escape_factor * direct_cost;
 }
 
 void OcsSwitch::send(std::unique_ptr<Chunk> chunk) noexcept {
@@ -411,6 +529,10 @@ void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
         }
     }
     if (assignment.direct) {
+        if (!assignment.stripes.empty()) {
+            consume_escaped_quota(path.front().device->get_id(),
+                                  path.back().device->get_id(), assignment);
+        }
         Topology::send(std::move(chunk));
         return;
     }
@@ -437,6 +559,39 @@ void OcsSwitch::dispatch(std::unique_ptr<Chunk> chunk,
                              bw_GBps_to_Bpns(plan_bandwidth)));
     for (const auto& stripe : assignment.stripes) {
         try_start_transmissions(stripe.plane);
+    }
+}
+
+void OcsSwitch::consume_escaped_quota(
+    const DeviceId src, const DeviceId dest,
+    const RuntimeAssignment& assignment) noexcept {
+    auto affected_planes = std::set<int>();
+    for (const auto& stripe : assignment.stripes) {
+        auto& state = plane_states[stripe.plane];
+        auto configuration = std::find_if(
+            state.configurations.begin(), state.configurations.end(),
+            [&assignment](const Configuration& item) {
+                return item.round == assignment.target_round;
+            });
+        if (configuration == state.configurations.end()) {
+            reject_ocs("escaped assignment references an unavailable round");
+        }
+        auto circuit = std::find_if(
+            configuration->circuits.begin(), configuration->circuits.end(),
+            [src, dest](const Circuit& item) {
+                return item.pair == Pair{src, dest};
+            });
+        if (circuit == configuration->circuits.end() ||
+            circuit->remaining < stripe.bytes) {
+            reject_ocs("escaped assignment exceeds its reserved circuit quota");
+        }
+        circuit->remaining -= stripe.bytes;
+        affected_planes.insert(stripe.plane);
+    }
+    for (const auto plane : affected_planes) {
+        if (configuration_complete(plane)) {
+            advance_configuration(plane);
+        }
     }
 }
 
@@ -578,6 +733,7 @@ void OcsSwitch::start_transmission(const int plane, Circuit& circuit,
                                    PendingStripe stripe) noexcept {
     circuit.busy = true;
     const auto bytes = stripe.bytes;
+    circuit.busy_bytes = bytes;
     const auto [source, destination] = circuit.pair;
     const auto switch_id = npus_count + plane;
     const auto source_port = to_switch_ports[plane][source];
@@ -665,6 +821,7 @@ void OcsSwitch::finish_serialization(Transmission* transmission) noexcept {
     }
     circuit->remaining -= transmission->bytes;
     circuit->busy = false;
+    circuit->busy_bytes = 0;
     const auto [source, destination] = transmission->pair;
     if (--active_endpoint_planes[source][transmission->plane] == 0) {
         active_endpoint_planes[source].erase(transmission->plane);
@@ -764,6 +921,10 @@ int OcsSwitch::get_completed_rounds() const noexcept {
 int OcsSwitch::get_reconfiguration_count() const noexcept { return reconfiguration_count; }
 uint64_t OcsSwitch::get_scheduled_bytes() const noexcept { return scheduled_bytes; }
 uint64_t OcsSwitch::get_transmitted_bytes() const noexcept { return transmitted_bytes; }
+uint64_t OcsSwitch::get_escaped_bytes() const noexcept { return escaped_bytes; }
+uint64_t OcsSwitch::get_escaped_assignments() const noexcept {
+    return escaped_assignments;
+}
 EventTime OcsSwitch::get_reconfiguration_time() const noexcept {
     auto total = EventTime{0};
     for (const auto& state : plane_states) {
@@ -841,6 +1002,8 @@ void OcsSwitch::print_link_metrics(std::ostream& output) const {
            << " plane_schedule_makespan_ns=" << get_plane_schedule_makespan()
            << " scheduled_bytes=" << scheduled_bytes
            << " transmitted_bytes=" << transmitted_bytes
+           << " escaped_bytes=" << escaped_bytes
+           << " escaped_assignments=" << escaped_assignments
            << " assignments=" << planned_assignments
            << " consumed_assignments=" << consumed_assignments
            << " circuit_wait_ns=" << circuit_wait_time
