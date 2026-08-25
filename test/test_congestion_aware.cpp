@@ -261,7 +261,7 @@ std::string write_synchronized_ocs_test_plan() {
     ]},
     {"index": 2, "synchronize": true, "configurations": [
       {"plane": 0, "stream": 2, "matching": [[6, 7]], "circuits": []},
-      {"plane": 1, "stream": 2, "matching": [[4, 5]],
+      {"plane": 1, "stream": -1, "matching": [[4, 5]],
        "circuits": [{"source": 4, "destination": 5, "bytes": 100}]}
     ]}
   ]

@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <ostream>
 #include <set>
 #include <yaml-cpp/yaml.h>
@@ -277,7 +278,7 @@ void OcsSwitch::validate_plan() const noexcept {
     }
     for (auto plane = 0; plane < planes; ++plane) {
         for (const auto& configuration : plane_states[plane].configurations) {
-            if (configuration.plane != plane || configuration.stream < 0) {
+            if (configuration.plane != plane || configuration.stream < -1) {
                 reject_ocs("invalid plane configuration");
             }
             auto sources = std::set<int>();
@@ -536,8 +537,28 @@ void OcsSwitch::try_start_transmissions(const int plane) noexcept {
         progress = false;
         auto& configuration = state.configurations[state.current];
         for (auto& circuit : configuration.circuits) {
-            auto found = pending.find({plane, circuit.pair.first,
-                                       circuit.pair.second, configuration.stream});
+            auto found = pending.end();
+            if (configuration.stream >= 0) {
+                found = pending.find({plane, circuit.pair.first,
+                                      circuit.pair.second, configuration.stream});
+            } else {
+                found = pending.lower_bound({
+                    plane, circuit.pair.first, circuit.pair.second,
+                    std::numeric_limits<int>::min()});
+                while (found != pending.end() &&
+                       std::get<0>(found->first) == plane &&
+                       std::get<1>(found->first) == circuit.pair.first &&
+                       std::get<2>(found->first) == circuit.pair.second &&
+                       found->second.empty()) {
+                    ++found;
+                }
+                if (found == pending.end() ||
+                    std::get<0>(found->first) != plane ||
+                    std::get<1>(found->first) != circuit.pair.first ||
+                    std::get<2>(found->first) != circuit.pair.second) {
+                    found = pending.end();
+                }
+            }
             if (circuit.busy || circuit.remaining == 0 || found == pending.end() ||
                 found->second.empty()) {
                 continue;
