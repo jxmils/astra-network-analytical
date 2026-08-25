@@ -844,6 +844,9 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
 
     EXPECT_EQ(count_links(metrics, LinkClass::BaseMesh), 4 * 16);
     EXPECT_EQ(count_links(metrics, LinkClass::SwitchUplink), 4 * 16);
+    EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({4, 4}));
+    EXPECT_EQ(topology.get_bandwidth_per_dim(),
+              std::vector<Bandwidth>({1.0, 1.0}));
     for (auto endpoint = 0; endpoint < 16; ++endpoint) {
         const auto device = topology.route(endpoint, endpoint).front();
         EXPECT_EQ(device->get_connected_device_ids().size(), 6);

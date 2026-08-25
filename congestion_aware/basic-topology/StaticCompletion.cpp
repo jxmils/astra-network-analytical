@@ -49,6 +49,9 @@ StaticCompletion::StaticCompletion(
     if (plan_path.empty()) {
         reject_completion("static completion requires a routing_plan file");
     }
+    dims_count = 2;
+    npus_count_per_dim = {side, side};
+    bandwidth_per_dim = {bandwidth, bandwidth};
     basic_topology_type = TopologyBuildingBlock::TorusStaticCompletion2D;
     build_base_torus();
     load_matchings(plan_path);
