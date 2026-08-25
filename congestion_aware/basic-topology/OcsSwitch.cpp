@@ -378,8 +378,7 @@ Route OcsSwitch::ocs_route(const DeviceId src, const DeviceId dest,
 double OcsSwitch::direct_path_cost(const DeviceId src, const DeviceId dest,
                                    const ChunkSize bytes) const noexcept {
     const auto path = direct_route(src, dest);
-    auto latency_cost = 0.0;
-    auto serialization_cost = 0.0;
+    auto cost = 0.0;
     auto current = path.begin();
     auto next = std::next(current);
     while (next != path.end()) {
@@ -387,15 +386,13 @@ double OcsSwitch::direct_path_cost(const DeviceId src, const DeviceId dest,
         const auto queued = current->device->get_outstanding_bytes(link);
         const auto bandwidth_Bpns = bw_GBps_to_Bpns(
             current->device->get_link_bandwidth(link));
-        latency_cost += current->device->get_link_latency(link);
-        serialization_cost = std::max(
-            serialization_cost,
-            (static_cast<double>(queued) + static_cast<double>(bytes)) /
-                bandwidth_Bpns);
+        cost += current->device->get_link_latency(link) +
+                (static_cast<double>(queued) + static_cast<double>(bytes)) /
+                    bandwidth_Bpns;
         ++current;
         ++next;
     }
-    return latency_cost + serialization_cost;
+    return cost;
 }
 
 double OcsSwitch::optical_path_cost(
