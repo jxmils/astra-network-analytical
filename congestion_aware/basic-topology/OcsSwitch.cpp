@@ -35,10 +35,10 @@ EventTime positive_event_delay(const double delay) noexcept {
 OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
                      const Latency latency, const std::string& plan_path,
                      const int expected_planes, const bool base_torus,
-                     const bool qtp_embedding) noexcept
+                     const bool qtp_embedding, const bool base_ring) noexcept
     : BasicTopology(npus_count, npus_count + expected_planes, bandwidth, latency),
       planes(0), expected_planes(expected_planes), base_torus(base_torus),
-      qtp_embedding(qtp_embedding),
+      qtp_embedding(qtp_embedding), base_ring(base_ring),
       width(static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))))),
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       direct_escape_factor(1.0),
@@ -49,7 +49,9 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
       max_release_slip(0), max_release_slip_request(-1),
       max_release_slip_planned(0), max_release_slip_actual(0) {
-    basic_topology_type = qtp_embedding
+    basic_topology_type = base_ring
+                              ? TopologyBuildingBlock::RingOcsDirectPreferred1D
+                              : qtp_embedding
                               ? TopologyBuildingBlock::TorusOcsQtp
                               : base_torus
                                     ? TopologyBuildingBlock::TorusOcsStatic2D
@@ -75,6 +77,17 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
             }
         }
         build_base_torus();
+    } else if (base_ring) {
+        dims_count = 1;
+        npus_count_per_dim = {npus_count};
+        bandwidth_per_dim = {bandwidth};
+        logical_to_physical.resize(npus_count);
+        physical_to_logical.resize(npus_count);
+        for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
+            logical_to_physical[endpoint] = endpoint;
+            physical_to_logical[endpoint] = endpoint;
+        }
+        build_base_ring();
     } else if (!plan_dimensions.empty()) {
         dims_count = static_cast<int>(plan_dimensions.size());
         npus_count_per_dim = plan_dimensions;
@@ -263,10 +276,12 @@ void OcsSwitch::validate_plan() const noexcept {
     if (planes != expected_planes) {
         reject_ocs("plan plane count does not match topology");
     }
-    if (!base_torus && std::abs(plan_bandwidth - bandwidth) > 1e-9) {
+    if (!base_torus && !base_ring &&
+        std::abs(plan_bandwidth - bandwidth) > 1e-9) {
         reject_ocs("plan link speed does not match network bandwidth");
     }
-    if (!base_torus && std::abs(propagation_ns - 2.0 * latency) > 1e-9) {
+    if (!base_torus && !base_ring &&
+        std::abs(propagation_ns - 2.0 * latency) > 1e-9) {
         reject_ocs("plan propagation must equal two physical-link latencies");
     }
     if (base_torus && width * width != npus_count) {
@@ -355,7 +370,7 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
     dispatch_assignments[key].push_back(assignment);
     ++consumed_assignments;
     if (assignment.direct) {
-        if (!base_torus) {
+        if (!base_torus && !base_ring) {
             reject_ocs("direct assignment requires a persistent base fabric");
         }
         return direct_route(src, dest);
@@ -462,7 +477,7 @@ double OcsSwitch::optical_path_cost(
 bool OcsSwitch::should_escape_direct(
     const DeviceId src, const DeviceId dest, const ChunkSize bytes,
     const RuntimeAssignment& assignment) const noexcept {
-    if (!base_torus) {
+    if (!base_torus && !base_ring) {
         return false;
     }
     const auto direct_cost = direct_path_cost(src, dest, bytes);
@@ -1098,6 +1113,22 @@ void OcsSwitch::build_base_torus() noexcept {
     }
 }
 
+void OcsSwitch::build_base_ring() noexcept {
+    for (auto source = 0; source < npus_count; ++source) {
+        const auto destination = (source + 1) % npus_count;
+        const auto ports = connect(source, destination, bandwidth, latency, true,
+                                   LinkClass::BaseMesh);
+        base_ports[{source, destination}] = ports.first;
+        base_ports[{destination, source}] = ports.second;
+        physical_metrics[{source, ports.first}] = {
+            source, destination, ports.first, LinkClass::BaseMesh,
+            0, 0, 0, 0, 0};
+        physical_metrics[{destination, ports.second}] = {
+            destination, source, ports.second, LinkClass::BaseMesh,
+            0, 0, 0, 0, 0};
+    }
+}
+
 int OcsSwitch::step_towards(const int current, const int target, const int extent,
                             const bool tie_backward) const noexcept {
     const auto forward = (target - current + extent) % extent;
@@ -1115,6 +1146,20 @@ int OcsSwitch::step_towards(const int current, const int target, const int exten
 Route OcsSwitch::direct_route(const DeviceId src, const DeviceId dest) const noexcept {
     auto path = Route();
     auto current = src;
+    if (base_ring) {
+        while (current != dest) {
+            const auto forward = (dest - current + npus_count) % npus_count;
+            const auto backward = npus_count - forward;
+            const auto next = (forward < backward ||
+                               (forward == backward && (current & 1) == 0))
+                                  ? (current + 1) % npus_count
+                                  : (current - 1 + npus_count) % npus_count;
+            path.emplace_back(devices[current], base_ports.at({current, next}));
+            current = next;
+        }
+        path.emplace_back(devices[dest]);
+        return path;
+    }
     const auto source_physical = logical_to_physical[src];
     const auto destination_physical = logical_to_physical[dest];
     auto x = source_physical % width;

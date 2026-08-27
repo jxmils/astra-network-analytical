@@ -15,6 +15,7 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Ring.h"
 #include "congestion_aware/Switch.h"
 #include "congestion_aware/StaticCompletion.h"
+#include <array>
 #include <cstdlib>
 #include <iostream>
 
@@ -35,6 +36,7 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     const auto nic_count = network_parser.get_nic_count();
     const auto& routing_plan_path = network_parser.get_routing_plan_path();
     const auto& ocs_plan_path = network_parser.get_ocs_plan_path();
+    const auto& mesh3d_extents = network_parser.get_mesh3d_extents();
 
     // for now, congestion_aware backend supports 1-dim topology only
     if (dims_count != 1) {
@@ -64,8 +66,20 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::Torus3D:
         return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, true);
     case TopologyBuildingBlock::Mesh3D3D:
+        if (!mesh3d_extents.empty()) {
+            return std::make_shared<Mesh3D>(
+                std::array<int, 3>{mesh3d_extents[0], mesh3d_extents[1],
+                                   mesh3d_extents[2]},
+                bandwidth, latency, false, true);
+        }
         return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, false, true);
     case TopologyBuildingBlock::Torus3D3D:
+        if (!mesh3d_extents.empty()) {
+            return std::make_shared<Mesh3D>(
+                std::array<int, 3>{mesh3d_extents[0], mesh3d_extents[1],
+                                   mesh3d_extents[2]},
+                bandwidth, latency, true, true);
+        }
         return std::make_shared<Mesh3D>(npus_count, bandwidth, latency, true, true);
     case TopologyBuildingBlock::Mesh2DSnake:
         return std::make_shared<Mesh2D>(npus_count, bandwidth, latency, false, Mesh2D::Embedding::Snake);
@@ -145,6 +159,9 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::TorusOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true);
+    case TopologyBuildingBlock::RingOcsDirectPreferred1D:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path, 4, false, false, true);
     case TopologyBuildingBlock::TorusOcsQtp:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true, true);

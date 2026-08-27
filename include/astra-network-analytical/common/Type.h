@@ -62,6 +62,7 @@ enum class TopologyBuildingBlock {
     TorusOcsStatic2D,
     TorusOcsAdaptive2D,
     TorusOcsDirectPreferred2D,
+    RingOcsDirectPreferred1D,
     TorusOcsQtp,
     TorusStaticCompletion2D,
     HierarchicalCluster

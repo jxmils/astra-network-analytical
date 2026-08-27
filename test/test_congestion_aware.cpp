@@ -170,6 +170,23 @@ std::string write_hybrid_ocs_test_plan() {
     return path;
 }
 
+std::string write_ring_ocs_test_plan() {
+    const auto path = "/tmp/analytical-ring-ocs.json";
+    auto output = std::ofstream(path);
+    output << R"({
+  "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 4,
+  "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
+  "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
+  "assignments": [
+    {"source": 0, "destination": 8, "bytes": 100, "stream": 0, "route": "DIRECT"},
+    {"source": 1, "destination": 9, "bytes": 100, "stream": 0, "route": "DIRECT"}
+  ],
+  "rounds": []
+})";
+    output.close();
+    return path;
+}
+
 std::string write_hybrid_escape_test_plan() {
     const auto path = "/tmp/analytical-torus-ocs-escape.json";
     auto output = std::ofstream(path);
@@ -449,6 +466,26 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) 
     EXPECT_EQ(topology.get_transmitted_bytes(), 200);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 64);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink), 64);
+    std::remove(plan.c_str());
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       RingOcsUsesTwoPersistentAndFourOpticalPorts) {
+    const auto plan = write_ring_ocs_test_plan();
+    auto topology = OcsSwitch(16, 1.0, 5.0, plan, 4, false, false, true);
+
+    EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({16}));
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 32);
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
+              128);
+    EXPECT_EQ(route_link_classes(topology.route(0, 8, 100, 0)),
+              std::vector<LinkClass>(8, LinkClass::BaseMesh));
+    EXPECT_EQ(route_ids(topology.route(1, 9, 100, 0)),
+              std::vector<DeviceId>({1, 0, 15, 14, 13, 12, 11, 10, 9}));
+    for (auto endpoint = 0; endpoint < 16; ++endpoint) {
+        EXPECT_EQ(topology.route(endpoint, endpoint).front()
+                      ->get_connected_device_ids().size(), 6);
+    }
     std::remove(plan.c_str());
 }
 
@@ -1029,6 +1066,36 @@ TEST_F(TestNetworkAnalyticalCongestionAware, ThreeDimensionalFabricsHaveExactPor
         EXPECT_EQ(directed_links,
                   wraparound ? 6 * npus
                              : 6 * extent * extent * (extent - 1));
+    }
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       RectangularThreeDimensionalTorusHasSixDistinctPortsAndMinimalRoutes) {
+    constexpr auto extents = std::array<int, 3>{4, 8, 8};
+    constexpr auto npus = extents[0] * extents[1] * extents[2];
+    const auto topology = Mesh3D(extents, 200.0, 1'000.0, true, true);
+
+    EXPECT_EQ(topology.get_npus_count_per_dim(),
+              std::vector<int>({4, 8, 8}));
+    for (auto source = 0; source < npus; ++source) {
+        const auto neighbors = topology.route(source, source).front()
+                                   ->get_connected_device_ids();
+        EXPECT_EQ(neighbors.size(), 6);
+        EXPECT_EQ(std::set<DeviceId>(neighbors.begin(), neighbors.end()).size(), 6);
+        for (auto destination = 0; destination < npus; ++destination) {
+            const auto ids = route_ids(topology.route(source, destination));
+            auto expected_hops = 0;
+            auto stride = 1;
+            for (const auto extent : extents) {
+                const auto first = (source / stride) % extent;
+                const auto second = (destination / stride) % extent;
+                const auto distance = std::abs(first - second);
+                expected_hops += std::min(distance, extent - distance);
+                stride *= extent;
+            }
+            EXPECT_EQ(ids.size() - 1,
+                      static_cast<std::size_t>(expected_hops));
+        }
     }
 }
 

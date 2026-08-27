@@ -85,6 +85,10 @@ const std::string& NetworkParser::get_ocs_plan_path() const noexcept {
     return ocs_plan_path;
 }
 
+const std::vector<int>& NetworkParser::get_mesh3d_extents() const noexcept {
+    return mesh3d_extents;
+}
+
 std::vector<TopologyBuildingBlock> NetworkParser::get_topologies_per_dim() const noexcept {
     assert(dims_count > 0);
     assert(topology_per_dim.size() == dims_count);
@@ -125,6 +129,9 @@ void NetworkParser::parse_network_config_yml(const YAML::Node& network_config) n
     ocs_plan_path = network_config["ocs_plan"]
                         ? network_config["ocs_plan"].as<std::string>()
                         : "";
+    mesh3d_extents = network_config["mesh3d_extents"]
+                         ? parse_vector<int>(network_config["mesh3d_extents"])
+                         : std::vector<int>();
 
     // check the validity of the parsed network config
     check_validity();
@@ -245,6 +252,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::TorusOcsDirectPreferred2D;
     }
 
+    if (topology_name == "RingOcsDirectPreferred1D") {
+        return TopologyBuildingBlock::RingOcsDirectPreferred1D;
+    }
+
     if (topology_name == "TorusOcsQtp") {
         return TopologyBuildingBlock::TorusOcsQtp;
     }
@@ -311,6 +322,36 @@ void NetworkParser::check_validity() const noexcept {
         std::cerr << "[Error] (network/analytical) nic_count (" << nic_count
                   << ") should be positive" << std::endl;
         std::exit(-1);
+    }
+
+    if (!mesh3d_extents.empty()) {
+        if (dims_count != 1 ||
+            (topology_per_dim[0] != TopologyBuildingBlock::Mesh3D3D &&
+             topology_per_dim[0] != TopologyBuildingBlock::Torus3D3D)) {
+            std::cerr << "[Error] (network/analytical) mesh3d_extents requires "
+                      << "single-dimension Mesh3D3D or Torus3D3D" << std::endl;
+            std::exit(-1);
+        }
+        if (mesh3d_extents.size() != 3) {
+            std::cerr << "[Error] (network/analytical) mesh3d_extents must have "
+                      << "exactly three entries" << std::endl;
+            std::exit(-1);
+        }
+        auto product = 1;
+        for (const auto extent : mesh3d_extents) {
+            if (extent <= 1) {
+                std::cerr << "[Error] (network/analytical) mesh3d_extents entries "
+                          << "must be larger than one" << std::endl;
+                std::exit(-1);
+            }
+            product *= extent;
+        }
+        if (product != npus_count_per_dim[0]) {
+            std::cerr << "[Error] (network/analytical) mesh3d_extents product ("
+                      << product << ") must match npus_count ("
+                      << npus_count_per_dim[0] << ")" << std::endl;
+            std::exit(-1);
+        }
     }
 
     // npus_count should be all positive
