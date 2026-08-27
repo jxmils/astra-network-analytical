@@ -35,10 +35,13 @@ EventTime positive_event_delay(const double delay) noexcept {
 OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
                      const Latency latency, const std::string& plan_path,
                      const int expected_planes, const bool base_torus,
-                     const bool qtp_embedding, const bool base_ring) noexcept
+                     const bool qtp_embedding, const bool base_ring,
+                     const bool base_row_ring,
+                     const bool qtp_row_embedding) noexcept
     : BasicTopology(npus_count, npus_count + expected_planes, bandwidth, latency),
       planes(0), expected_planes(expected_planes), base_torus(base_torus),
       qtp_embedding(qtp_embedding), base_ring(base_ring),
+      base_row_ring(base_row_ring), qtp_row_embedding(qtp_row_embedding),
       width(static_cast<int>(std::lround(std::sqrt(static_cast<double>(npus_count))))),
       plan_bandwidth(0), propagation_ns(0), reconfiguration_ns(0),
       direct_escape_factor(1.0),
@@ -49,7 +52,11 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       planned_assignments(0), consumed_assignments(0), causal_dispatches(0),
       max_release_slip(0), max_release_slip_request(-1),
       max_release_slip_planned(0), max_release_slip_actual(0) {
-    basic_topology_type = base_ring
+    basic_topology_type = base_row_ring
+                              ? qtp_row_embedding
+                                    ? TopologyBuildingBlock::RowRingOcsQtp
+                                    : TopologyBuildingBlock::RowRingOcsDirectPreferred2D
+                              : base_ring
                               ? TopologyBuildingBlock::RingOcsDirectPreferred2D
                               : qtp_embedding
                               ? TopologyBuildingBlock::TorusOcsQtp
@@ -77,6 +84,21 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
             }
         }
         build_base_torus();
+    } else if (base_row_ring) {
+        dims_count = static_cast<int>(plan_dimensions.size());
+        npus_count_per_dim = plan_dimensions;
+        bandwidth_per_dim.assign(plan_dimensions.size(), bandwidth);
+        if (qtp_row_embedding) {
+            build_qtp_row_embedding();
+        } else {
+            logical_to_physical.resize(npus_count);
+            physical_to_logical.resize(npus_count);
+            for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
+                logical_to_physical[endpoint] = endpoint;
+                physical_to_logical[endpoint] = endpoint;
+            }
+        }
+        build_base_row_ring();
     } else if (base_ring) {
         dims_count = static_cast<int>(plan_dimensions.size());
         npus_count_per_dim = plan_dimensions;
@@ -276,11 +298,11 @@ void OcsSwitch::validate_plan() const noexcept {
     if (planes != expected_planes) {
         reject_ocs("plan plane count does not match topology");
     }
-    if (!base_torus && !base_ring &&
+    if (!base_torus && !base_ring && !base_row_ring &&
         std::abs(plan_bandwidth - bandwidth) > 1e-9) {
         reject_ocs("plan link speed does not match network bandwidth");
     }
-    if (!base_torus && !base_ring &&
+    if (!base_torus && !base_ring && !base_row_ring &&
         std::abs(propagation_ns - 2.0 * latency) > 1e-9) {
         reject_ocs("plan propagation must equal two physical-link latencies");
     }
@@ -290,8 +312,20 @@ void OcsSwitch::validate_plan() const noexcept {
     if (qtp_embedding && npus_count != 64) {
         reject_ocs("QTP embedding requires exactly 64 endpoints");
     }
+    if (qtp_row_embedding && npus_count != 64) {
+        reject_ocs("row-ring QTP embedding requires exactly 64 endpoints");
+    }
     if (base_ring && plan_dimensions.size() != 2) {
         reject_ocs("ring Hybrid requires a two-dimensional logical collective");
+    }
+    if (base_row_ring && width * width != npus_count) {
+        reject_ocs("row-ring Hybrid requires a square endpoint count");
+    }
+    if (base_row_ring && !qtp_row_embedding && plan_dimensions.size() != 2) {
+        reject_ocs("row-ring Hybrid requires a two-dimensional logical collective");
+    }
+    if (qtp_row_embedding && plan_dimensions != std::vector<int>({4, 2, 8})) {
+        reject_ocs("row-ring QTP requires [4,2,8] plan dimensions");
     }
     if (reconfiguration_ns < 0 || direct_escape_factor <= 0) {
         reject_ocs("reconfiguration latency must be nonnegative");
@@ -373,7 +407,7 @@ Route OcsSwitch::route(const DeviceId src, const DeviceId dest,
     dispatch_assignments[key].push_back(assignment);
     ++consumed_assignments;
     if (assignment.direct) {
-        if (!base_torus && !base_ring) {
+        if (!base_torus && !base_ring && !base_row_ring) {
             reject_ocs("direct assignment requires a persistent base fabric");
         }
         return direct_route(src, dest);
@@ -480,7 +514,7 @@ double OcsSwitch::optical_path_cost(
 bool OcsSwitch::should_escape_direct(
     const DeviceId src, const DeviceId dest, const ChunkSize bytes,
     const RuntimeAssignment& assignment) const noexcept {
-    if (!base_torus && !base_ring) {
+    if (!base_torus && !base_ring && !base_row_ring) {
         return false;
     }
     const auto direct_cost = direct_path_cost(src, dest, bytes);
@@ -1091,6 +1125,26 @@ void OcsSwitch::build_qtp_embedding() noexcept {
     }
 }
 
+void OcsSwitch::build_qtp_row_embedding() noexcept {
+    if (npus_count != 64 || width != 8) {
+        reject_ocs("row-ring QTP embedding requires eight 8-chip rows");
+    }
+    constexpr int qtp8[] = {0, 1, 4, 5, 7, 2, 3, 6};
+    logical_to_physical.assign(npus_count, -1);
+    physical_to_logical.assign(npus_count, -1);
+    for (auto logical = 0; logical < npus_count; ++logical) {
+        const auto a = logical % 4;
+        const auto b = (logical / 4) % 2;
+        const auto row = logical / 8;
+        const auto physical = row * width + qtp8[a + 4 * b];
+        if (physical_to_logical[physical] != -1) {
+            reject_ocs("row-ring QTP embedding is not a permutation");
+        }
+        logical_to_physical[logical] = physical;
+        physical_to_logical[physical] = logical;
+    }
+}
+
 void OcsSwitch::build_base_torus() noexcept {
     auto remember = [this](const DeviceId first, const DeviceId second) {
         const auto ports = connect(first, second, bandwidth, latency, true,
@@ -1112,6 +1166,23 @@ void OcsSwitch::build_base_torus() noexcept {
             } else {
                 remember(node, physical_to_logical[x]);
             }
+        }
+    }
+}
+
+void OcsSwitch::build_base_row_ring() noexcept {
+    auto remember = [this](const DeviceId first, const DeviceId second) {
+        const auto ports = connect(first, second, bandwidth, latency, true,
+                                   LinkClass::BaseMesh);
+        base_ports[{first, second}] = ports.first;
+        base_ports[{second, first}] = ports.second;
+    };
+    for (auto y = 0; y < width; ++y) {
+        for (auto x = 0; x < width; ++x) {
+            const auto physical = y * width + x;
+            const auto node = physical_to_logical[physical];
+            const auto next = y * width + ((x + 1) % width);
+            remember(node, physical_to_logical[next]);
         }
     }
 }
@@ -1143,6 +1214,27 @@ int OcsSwitch::step_towards(const int current, const int target, const int exten
 Route OcsSwitch::direct_route(const DeviceId src, const DeviceId dest) const noexcept {
     auto path = Route();
     auto current = src;
+    if (base_row_ring) {
+        auto source_physical = logical_to_physical[src];
+        const auto destination_physical = logical_to_physical[dest];
+        const auto source_y = source_physical / width;
+        const auto destination_y = destination_physical / width;
+        if (source_y != destination_y) {
+            reject_ocs("row-ring direct assignment crossed rows");
+        }
+        auto x = source_physical % width;
+        const auto destination_x = destination_physical % width;
+        while (x != destination_x) {
+            const auto next_x = step_towards(
+                x, destination_x, width, (x & 1) != 0);
+            const auto next = physical_to_logical[source_y * width + next_x];
+            path.emplace_back(devices[current], base_ports.at({current, next}));
+            current = next;
+            x = next_x;
+        }
+        path.emplace_back(devices[dest]);
+        return path;
+    }
     if (base_ring) {
         while (current != dest) {
             const auto forward = (dest - current + npus_count) % npus_count;

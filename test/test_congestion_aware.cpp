@@ -4,6 +4,7 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #include "common/EventQueue.h"
+#include "common/NetworkFunction.h"
 #include "common/NetworkParser.h"
 #include "common/Type.h"
 #include "congestion_aware/Chunk.h"
@@ -27,6 +28,11 @@ LICENSE file in the root directory of this source tree.
 
 using namespace NetworkAnalytical;
 using namespace NetworkAnalyticalCongestionAware;
+
+TEST(NetworkFunction, DecimalGigabytesPerSecondEqualBytesPerNanosecond) {
+    EXPECT_DOUBLE_EQ(bw_GBps_to_Bpns(1.0), 1.0);
+    EXPECT_DOUBLE_EQ(bw_GBps_to_Bpns(200.0), 200.0);
+}
 
 class TestNetworkAnalyticalCongestionAware : public ::testing::Test {
   protected:
@@ -352,17 +358,17 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchEnforcesRoundsAndReconfigu
     }
 
     EXPECT_EQ(first.arrival_time, parallel.arrival_time);
-    EXPECT_EQ(first.arrival_time, 104);
-    EXPECT_EQ(second_round.arrival_time, 205);
+    EXPECT_EQ(first.arrival_time, 110);
+    EXPECT_EQ(second_round.arrival_time, 217);
     EXPECT_EQ(topology.get_completed_rounds(), 3);
     EXPECT_EQ(topology.get_reconfiguration_count(), 1);
     EXPECT_EQ(topology.get_reconfiguration_time(), 7);
     EXPECT_EQ(topology.get_scheduled_bytes(), 300);
     EXPECT_EQ(topology.get_transmitted_bytes(), 300);
-    EXPECT_EQ(topology.get_circuit_wait_time(), 101);
-    EXPECT_EQ(topology.get_max_circuit_wait_time(), 101);
+    EXPECT_EQ(topology.get_circuit_wait_time(), 107);
+    EXPECT_EQ(topology.get_max_circuit_wait_time(), 107);
     EXPECT_EQ(topology.get_circuit_transmissions(), 3);
-    EXPECT_EQ(topology.get_plane_schedule_makespan(), 195);
+    EXPECT_EQ(topology.get_plane_schedule_makespan(), 207);
     std::remove(plan.c_str());
 }
 
@@ -380,7 +386,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, OcsSwitchChargesOptionalInitialConf
         event_queue->proceed();
     }
 
-    EXPECT_EQ(observation.arrival_time, 111);
+    EXPECT_EQ(observation.arrival_time, 117);
     EXPECT_EQ(topology.get_reconfiguration_count(), 3);
     EXPECT_EQ(topology.get_reconfiguration_time(), 21);
     std::remove(plan.c_str());
@@ -397,11 +403,11 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
         event_queue->proceed();
     }
 
-    EXPECT_EQ(observation.arrival_time, 57);
+    EXPECT_EQ(observation.arrival_time, 60);
     EXPECT_EQ(topology.get_scheduled_bytes(), 100);
     EXPECT_EQ(topology.get_transmitted_bytes(), 100);
     EXPECT_EQ(topology.get_circuit_transmissions(), 2);
-    EXPECT_EQ(topology.get_plane_schedule_makespan(), 47);
+    EXPECT_EQ(topology.get_plane_schedule_makespan(), 50);
     EXPECT_EQ(topology.get_max_active_ports(0), 2);
     EXPECT_EQ(topology.get_max_distinct_peers(0), 1);
     const auto routes = topology.get_route_metrics();
@@ -424,7 +430,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
         event_queue->proceed();
     }
 
-    EXPECT_EQ(observation.arrival_time, 27);
+    EXPECT_EQ(observation.arrival_time, 28);
     const auto routes = topology.get_route_metrics();
     ASSERT_EQ(routes.size(), 1);
     EXPECT_EQ(routes[0].hops, 1);
@@ -460,9 +466,9 @@ TEST_F(TestNetworkAnalyticalCongestionAware, TorusOcsUsesDirectAndCircuitPorts) 
         event_queue->proceed();
     }
 
-    EXPECT_EQ(direct.arrival_time, 98);
-    EXPECT_EQ(circuit.arrival_time, 104);
-    EXPECT_EQ(later_stream.arrival_time, 198);
+    EXPECT_EQ(direct.arrival_time, 105);
+    EXPECT_EQ(circuit.arrival_time, 110);
+    EXPECT_EQ(later_stream.arrival_time, 210);
     EXPECT_EQ(topology.get_scheduled_bytes(), 200);
     EXPECT_EQ(topology.get_transmitted_bytes(), 200);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 64);
@@ -593,9 +599,9 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
         event_queue->proceed();
     }
 
-    EXPECT_EQ(first_plane_one.arrival_time, 104);
-    EXPECT_EQ(long_plane_zero.arrival_time, 197);
-    EXPECT_EQ(second_plane_one.arrival_time, 298);
+    EXPECT_EQ(first_plane_one.arrival_time, 110);
+    EXPECT_EQ(long_plane_zero.arrival_time, 210);
+    EXPECT_EQ(second_plane_one.arrival_time, 317);
     EXPECT_GT(second_plane_one.arrival_time, long_plane_zero.arrival_time);
     EXPECT_EQ(topology.get_completed_rounds(), 5);
     EXPECT_EQ(topology.get_reconfiguration_count(), 2);
@@ -890,13 +896,13 @@ TEST_F(TestNetworkAnalyticalCongestionAware, ExtraLinkLatencyChangesPhysicalArri
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware,
-       StaticCompletionHasExactPortsAndPhysicalOpticalHops) {
+       StaticCompletionHasExactPortsAndTransparentOpticalEdges) {
     const auto plan = write_static_completion_test_plan();
     const auto topology = StaticCompletion(16, 1.0, 5.0, 1.0, 5.0, plan);
     const auto metrics = topology.get_link_metrics();
 
     EXPECT_EQ(count_links(metrics, LinkClass::BaseMesh), 4 * 16);
-    EXPECT_EQ(count_links(metrics, LinkClass::SwitchUplink), 4 * 16);
+    EXPECT_EQ(count_links(metrics, LinkClass::SwitchUplink), 2 * 16);
     EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({4, 4}));
     EXPECT_EQ(topology.get_bandwidth_per_dim(),
               std::vector<Bandwidth>({1.0, 1.0}));
@@ -906,9 +912,9 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     }
 
     const auto optical_route = topology.route(0, 10, 100);
-    EXPECT_EQ(route_ids(optical_route), std::vector<DeviceId>({0, 16, 10}));
+    EXPECT_EQ(route_ids(optical_route), std::vector<DeviceId>({0, 10}));
     EXPECT_EQ(route_link_classes(optical_route),
-              std::vector<LinkClass>(2, LinkClass::SwitchUplink));
+              std::vector<LinkClass>(1, LinkClass::SwitchUplink));
     EXPECT_EQ(std::remove(plan.c_str()), 0);
 }
 
@@ -931,12 +937,12 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware,
-       StaticCompletionChargesBothOpticalLegLatencies) {
-    const auto measure = [this](const Latency leg_latency) {
+       StaticCompletionChargesOneOpticalPathLatency) {
+    const auto measure = [this](const Latency path_latency) {
         event_queue = std::make_shared<EventQueue>();
         Topology::set_event_queue(event_queue);
         const auto plan = write_static_completion_test_plan();
-        auto topology = StaticCompletion(16, 1.0, 0.0, 1.0, leg_latency, plan);
+        auto topology = StaticCompletion(16, 1.0, 0.0, 1.0, path_latency, plan);
         auto observation = ArrivalObservation{event_queue};
         topology.send(std::make_unique<Chunk>(
             100, topology.route(0, 10, 100), record_arrival, &observation));
@@ -947,7 +953,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
         return observation.arrival_time;
     };
 
-    EXPECT_EQ(measure(5.0) - measure(0.0), 10);
+    EXPECT_EQ(measure(5.0) - measure(0.0), 5);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, MeshAndTorusGraphStructure) {
@@ -1493,7 +1499,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, Ring) {
 
     /// test
     const auto simulation_time = event_queue->get_current_time();
-    EXPECT_EQ(simulation_time, 60'093);
+    EXPECT_EQ(simulation_time, 64'413);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, FullyConnected) {
@@ -1515,7 +1521,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, FullyConnected) {
 
     /// test
     const auto simulation_time = event_queue->get_current_time();
-    EXPECT_EQ(simulation_time, 20'031);
+    EXPECT_EQ(simulation_time, 21'471);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, Switch) {
@@ -1537,7 +1543,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware, Switch) {
 
     /// test
     const auto simulation_time = event_queue->get_current_time();
-    EXPECT_EQ(simulation_time, 40'062);
+    EXPECT_EQ(simulation_time, 42'942);
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware, AllGatherOnRing) {
@@ -1573,5 +1579,5 @@ TEST_F(TestNetworkAnalyticalCongestionAware, AllGatherOnRing) {
 
     /// test
     const auto simulation_time = event_queue->get_current_time();
-    EXPECT_EQ(simulation_time, 704'116);
+    EXPECT_EQ(simulation_time, 755'956);
 }

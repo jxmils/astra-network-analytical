@@ -22,7 +22,8 @@ class OcsSwitch final : public BasicTopology {
     OcsSwitch(int npus_count, Bandwidth bandwidth, Latency latency,
               const std::string& plan_path, int expected_planes = 6,
               bool base_torus = false, bool qtp_embedding = false,
-              bool base_ring = false) noexcept;
+              bool base_ring = false, bool base_row_ring = false,
+              bool qtp_row_embedding = false) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
@@ -137,6 +138,8 @@ class OcsSwitch final : public BasicTopology {
     bool base_torus;
     bool qtp_embedding;
     bool base_ring;
+    bool base_row_ring;
+    bool qtp_row_embedding;
     int width;
     double plan_bandwidth;
     double propagation_ns;
@@ -191,6 +194,8 @@ class OcsSwitch final : public BasicTopology {
     void build_qtp_embedding() noexcept;
     void build_base_torus() noexcept;
     void build_base_ring() noexcept;
+    void build_qtp_row_embedding() noexcept;
+    void build_base_row_ring() noexcept;
     [[nodiscard]] Route direct_route(DeviceId src, DeviceId dest) const noexcept;
     [[nodiscard]] int step_towards(int current, int target, int extent,
                                    bool tie_backward) const noexcept;

@@ -152,6 +152,9 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::OcsSwitch6:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path);
+    case TopologyBuildingBlock::OcsSwitch4:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path, 4);
     case TopologyBuildingBlock::IdealFlex6R4:
         return std::make_shared<IdealFlex>(npus_count, bandwidth, latency);
     case TopologyBuildingBlock::TorusOcsStatic2D:
@@ -159,6 +162,14 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::TorusOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true);
+    case TopologyBuildingBlock::RowRingOcsDirectPreferred2D:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path, 2, false, false,
+                                           false, true);
+    case TopologyBuildingBlock::RowRingOcsQtp:
+        return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
+                                           ocs_plan_path, 2, false, false,
+                                           false, true, true);
     case TopologyBuildingBlock::RingOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 4, false, false, true);
@@ -167,7 +178,8 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
                                            ocs_plan_path, 2, true, true);
     case TopologyBuildingBlock::TorusStaticCompletion2D:
         return std::make_shared<StaticCompletion>(
-            npus_count, bandwidth, latency, extra_bandwidth, extra_latency,
+            npus_count, bandwidth, latency, extra_bandwidth,
+            2.0 * extra_latency,
             routing_plan_path);
     case TopologyBuildingBlock::HierarchicalCluster:
         return std::make_shared<HierarchicalCluster>(

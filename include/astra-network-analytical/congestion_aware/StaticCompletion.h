@@ -17,7 +17,7 @@ namespace NetworkAnalyticalCongestionAware {
 class StaticCompletion final : public BasicTopology {
   public:
     StaticCompletion(int npus_count, Bandwidth bandwidth, Latency latency,
-                     Bandwidth optical_bandwidth, Latency optical_leg_latency,
+                     Bandwidth optical_bandwidth, Latency optical_path_latency,
                      const std::string& plan_path) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
@@ -27,15 +27,13 @@ class StaticCompletion final : public BasicTopology {
   private:
     struct Arc {
         DeviceId destination;
-        int plane;
         LinkId source_port;
-        LinkId switch_port;
     };
 
     int side;
     int planes;
     Bandwidth optical_bandwidth;
-    Latency optical_leg_latency;
+    Latency optical_path_latency;
     std::vector<std::vector<Arc>> adjacency;
 
     void build_base_torus() noexcept;

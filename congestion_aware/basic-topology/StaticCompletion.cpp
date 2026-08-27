@@ -32,18 +32,18 @@ namespace {
 
 StaticCompletion::StaticCompletion(
     const int npus_count, const Bandwidth bandwidth, const Latency latency,
-    const Bandwidth optical_bandwidth, const Latency optical_leg_latency,
+    const Bandwidth optical_bandwidth, const Latency optical_path_latency,
     const std::string& plan_path) noexcept
-    : BasicTopology(npus_count, npus_count + 2, bandwidth, latency),
+    : BasicTopology(npus_count, npus_count, bandwidth, latency),
       side(static_cast<int>(std::lround(std::sqrt(npus_count)))),
       planes(2),
       optical_bandwidth(optical_bandwidth),
-      optical_leg_latency(optical_leg_latency),
+      optical_path_latency(optical_path_latency),
       adjacency(npus_count) {
     if (side * side != npus_count) {
         reject_completion("static completion requires a square endpoint count");
     }
-    if (optical_bandwidth <= 0 || optical_leg_latency < 0) {
+    if (optical_bandwidth <= 0 || optical_path_latency < 0) {
         reject_completion("static completion has invalid optical link parameters");
     }
     if (plan_path.empty()) {
@@ -61,8 +61,8 @@ void StaticCompletion::build_base_torus() noexcept {
     const auto add_edge = [this](const DeviceId first, const DeviceId second) {
         const auto ports = connect(first, second, bandwidth, latency, true,
                                    LinkClass::BaseMesh);
-        adjacency[first].push_back({second, -1, ports.first, AutomaticLink});
-        adjacency[second].push_back({first, -1, ports.second, AutomaticLink});
+        adjacency[first].push_back({second, ports.first});
+        adjacency[second].push_back({first, ports.second});
     };
     for (auto y = 0; y < side; ++y) {
         for (auto x = 0; x < side; ++x) {
@@ -93,21 +93,6 @@ void StaticCompletion::load_matchings(const std::string& path) noexcept {
             reject_completion("invalid static-completion plan header");
         }
 
-        auto endpoint_ports = std::vector<std::vector<LinkId>>(
-            planes, std::vector<LinkId>(npus_count));
-        auto switch_ports = std::vector<std::vector<LinkId>>(
-            planes, std::vector<LinkId>(npus_count));
-        for (auto plane = 0; plane < planes; ++plane) {
-            const auto switch_id = npus_count + plane;
-            for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
-                const auto ports = connect(
-                    endpoint, switch_id, optical_bandwidth,
-                    optical_leg_latency, true, LinkClass::SwitchUplink);
-                endpoint_ports[plane][endpoint] = ports.first;
-                switch_ports[plane][endpoint] = ports.second;
-            }
-        }
-
         auto installed = std::set<std::pair<int, int>>();
         for (auto plane = 0; plane < planes; ++plane) {
             const auto matching = root["matchings"][plane];
@@ -135,17 +120,16 @@ void StaticCompletion::load_matchings(const std::string& path) noexcept {
                 const auto duplicates_base = std::any_of(
                     adjacency[first].begin(), adjacency[first].end(),
                     [second](const Arc& arc) {
-                        return arc.plane < 0 && arc.destination == second;
+                        return arc.destination == second;
                     });
                 if (duplicates_base) {
                     reject_completion("static completion duplicates a torus edge");
                 }
-                adjacency[first].push_back({
-                    second, plane, endpoint_ports[plane][first],
-                    switch_ports[plane][second]});
-                adjacency[second].push_back({
-                    first, plane, endpoint_ports[plane][second],
-                    switch_ports[plane][first]});
+                const auto ports = connect(
+                    first, second, optical_bandwidth,
+                    optical_path_latency, true, LinkClass::SwitchUplink);
+                adjacency[first].push_back({second, ports.first});
+                adjacency[second].push_back({first, ports.second});
             }
             if (std::any_of(degree.begin(), degree.end(),
                             [](const int value) { return value != 1; })) {
@@ -159,22 +143,11 @@ void StaticCompletion::load_matchings(const std::string& path) noexcept {
 
 double StaticCompletion::arc_cost(
     const DeviceId source, const Arc& arc, const ChunkSize bytes) const noexcept {
-    const auto first_bandwidth = devices[source]->get_link_bandwidth(arc.source_port);
-    auto cost = devices[source]->get_link_latency(arc.source_port) +
-                (static_cast<double>(devices[source]->get_outstanding_bytes(
-                     arc.source_port)) + static_cast<double>(bytes)) /
-                    bw_GBps_to_Bpns(first_bandwidth);
-    if (arc.plane < 0) {
-        return cost;
-    }
-    const auto switch_id = npus_count + arc.plane;
-    const auto second_bandwidth =
-        devices[switch_id]->get_link_bandwidth(arc.switch_port);
-    cost += devices[switch_id]->get_link_latency(arc.switch_port) +
-            (static_cast<double>(devices[switch_id]->get_outstanding_bytes(
-                 arc.switch_port)) + static_cast<double>(bytes)) /
-                bw_GBps_to_Bpns(second_bandwidth);
-    return cost;
+    const auto link_bandwidth = devices[source]->get_link_bandwidth(arc.source_port);
+    return devices[source]->get_link_latency(arc.source_port) +
+           (static_cast<double>(devices[source]->get_outstanding_bytes(
+                arc.source_port)) + static_cast<double>(bytes)) /
+               bw_GBps_to_Bpns(link_bandwidth);
 }
 
 Route StaticCompletion::route(const DeviceId src, const DeviceId dest) const noexcept {
@@ -235,9 +208,6 @@ Route StaticCompletion::route(
         assert(source == current);
         const auto& arc = adjacency[source][index];
         result.emplace_back(devices[source], arc.source_port);
-        if (arc.plane >= 0) {
-            result.emplace_back(devices[npus_count + arc.plane], arc.switch_port);
-        }
         current = arc.destination;
     }
     result.emplace_back(devices[dest]);
