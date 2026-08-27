@@ -159,7 +159,7 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
     case TopologyBuildingBlock::TorusOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 2, true);
-    case TopologyBuildingBlock::RingOcsDirectPreferred1D:
+    case TopologyBuildingBlock::RingOcsDirectPreferred2D:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path, 4, false, false, true);
     case TopologyBuildingBlock::TorusOcsQtp:

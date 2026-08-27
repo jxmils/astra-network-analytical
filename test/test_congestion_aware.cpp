@@ -175,6 +175,7 @@ std::string write_ring_ocs_test_plan() {
     auto output = std::ofstream(path);
     output << R"({
   "format": "panel-ocs-plan", "version": 5, "endpoints": 16, "planes": 4,
+  "logical_dimensions": [4, 4],
   "link_bandwidth_GBps": 1.0, "propagation_ns": 10.0,
   "reconfiguration_ns": 7.0, "initial_reconfiguration": false,
   "assignments": [
@@ -474,7 +475,7 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     const auto plan = write_ring_ocs_test_plan();
     auto topology = OcsSwitch(16, 1.0, 5.0, plan, 4, false, false, true);
 
-    EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({16}));
+    EXPECT_EQ(topology.get_npus_count_per_dim(), std::vector<int>({4, 4}));
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 32);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
               128);

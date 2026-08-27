@@ -50,7 +50,7 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
       max_release_slip(0), max_release_slip_request(-1),
       max_release_slip_planned(0), max_release_slip_actual(0) {
     basic_topology_type = base_ring
-                              ? TopologyBuildingBlock::RingOcsDirectPreferred1D
+                              ? TopologyBuildingBlock::RingOcsDirectPreferred2D
                               : qtp_embedding
                               ? TopologyBuildingBlock::TorusOcsQtp
                               : base_torus
@@ -78,9 +78,9 @@ OcsSwitch::OcsSwitch(const int npus_count, const Bandwidth bandwidth,
         }
         build_base_torus();
     } else if (base_ring) {
-        dims_count = 1;
-        npus_count_per_dim = {npus_count};
-        bandwidth_per_dim = {bandwidth};
+        dims_count = static_cast<int>(plan_dimensions.size());
+        npus_count_per_dim = plan_dimensions;
+        bandwidth_per_dim.assign(plan_dimensions.size(), bandwidth);
         logical_to_physical.resize(npus_count);
         physical_to_logical.resize(npus_count);
         for (auto endpoint = 0; endpoint < npus_count; ++endpoint) {
@@ -289,6 +289,9 @@ void OcsSwitch::validate_plan() const noexcept {
     }
     if (qtp_embedding && npus_count != 64) {
         reject_ocs("QTP embedding requires exactly 64 endpoints");
+    }
+    if (base_ring && plan_dimensions.size() != 2) {
+        reject_ocs("ring Hybrid requires a two-dimensional logical collective");
     }
     if (reconfiguration_ns < 0 || direct_escape_factor <= 0) {
         reject_ocs("reconfiguration latency must be nonnegative");

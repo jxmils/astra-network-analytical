@@ -252,8 +252,8 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::TorusOcsDirectPreferred2D;
     }
 
-    if (topology_name == "RingOcsDirectPreferred1D") {
-        return TopologyBuildingBlock::RingOcsDirectPreferred1D;
+    if (topology_name == "RingOcsDirectPreferred2D") {
+        return TopologyBuildingBlock::RingOcsDirectPreferred2D;
     }
 
     if (topology_name == "TorusOcsQtp") {
