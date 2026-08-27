@@ -478,8 +478,23 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::BaseMesh), 32);
     EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
               128);
-    EXPECT_EQ(route_link_classes(topology.route(0, 8, 100, 0)),
+    const auto direct_route = topology.route(0, 8, 100, 0);
+    EXPECT_EQ(route_link_classes(direct_route),
               std::vector<LinkClass>(8, LinkClass::BaseMesh));
+    auto direct = ArrivalObservation{event_queue};
+    topology.send(std::make_unique<Chunk>(
+        100, direct_route, 0, record_arrival, &direct));
+    while (!event_queue->finished()) {
+        event_queue->proceed();
+    }
+    const auto metrics = topology.get_link_metrics();
+    const auto base_bytes = std::accumulate(
+        metrics.begin(), metrics.end(), uint64_t{0},
+        [](const uint64_t total, const LinkMetrics& metric) {
+            return total + (metric.link_class == LinkClass::BaseMesh
+                                ? metric.bytes : 0);
+        });
+    EXPECT_EQ(base_bytes, 800);
     EXPECT_EQ(route_ids(topology.route(1, 9, 100, 0)),
               std::vector<DeviceId>({1, 0, 15, 14, 13, 12, 11, 10, 9}));
     for (auto endpoint = 0; endpoint < 16; ++endpoint) {

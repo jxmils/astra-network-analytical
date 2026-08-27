@@ -1120,12 +1120,6 @@ void OcsSwitch::build_base_ring() noexcept {
                                    LinkClass::BaseMesh);
         base_ports[{source, destination}] = ports.first;
         base_ports[{destination, source}] = ports.second;
-        physical_metrics[{source, ports.first}] = {
-            source, destination, ports.first, LinkClass::BaseMesh,
-            0, 0, 0, 0, 0};
-        physical_metrics[{destination, ports.second}] = {
-            destination, source, ports.second, LinkClass::BaseMesh,
-            0, 0, 0, 0, 0};
     }
 }
 
