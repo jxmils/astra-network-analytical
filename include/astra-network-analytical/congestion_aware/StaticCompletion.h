@@ -13,12 +13,15 @@ using namespace NetworkAnalytical;
 
 namespace NetworkAnalyticalCongestionAware {
 
-/** A 2-D torus completed by fixed perfect matchings on optical planes. */
+/** A persistent base fabric completed by fixed optical perfect matchings. */
 class StaticCompletion final : public BasicTopology {
   public:
+    enum class BaseFabric { Torus2D, RowRings };
+
     StaticCompletion(int npus_count, Bandwidth bandwidth, Latency latency,
                      Bandwidth optical_bandwidth, Latency optical_path_latency,
-                     const std::string& plan_path) noexcept;
+                     const std::string& plan_path,
+                     BaseFabric base_fabric = BaseFabric::Torus2D) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,
@@ -34,9 +37,10 @@ class StaticCompletion final : public BasicTopology {
     int planes;
     Bandwidth optical_bandwidth;
     Latency optical_path_latency;
+    BaseFabric base_fabric;
     std::vector<std::vector<Arc>> adjacency;
 
-    void build_base_torus() noexcept;
+    void build_base() noexcept;
     void load_matchings(const std::string& path) noexcept;
     [[nodiscard]] double arc_cost(DeviceId source, const Arc& arc,
                                   ChunkSize bytes) const noexcept;

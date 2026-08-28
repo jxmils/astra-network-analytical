@@ -135,13 +135,15 @@ std::string write_ocs_test_plan(const std::string& name,
     return path;
 }
 
-std::string write_static_completion_test_plan() {
+std::string write_static_completion_test_plan(
+    const std::string& base_fabric = "torus2d") {
     const auto path = "/tmp/analytical-static-completion.json";
     auto output = std::ofstream(path);
     output << R"({
   "format": "panel-static-completion",
   "version": 1,
   "endpoints": 16,
+  "base_fabric": ")" << base_fabric << R"(",
   "matchings": [
     [[0, 10], [1, 11], [2, 8], [3, 9],
      [4, 14], [5, 15], [6, 12], [7, 13]],
@@ -915,6 +917,25 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(route_ids(optical_route), std::vector<DeviceId>({0, 10}));
     EXPECT_EQ(route_link_classes(optical_route),
               std::vector<LinkClass>(1, LinkClass::SwitchUplink));
+    EXPECT_EQ(std::remove(plan.c_str()), 0);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       RowRingStaticCompletionUsesFourEndpointPorts) {
+    const auto plan = write_static_completion_test_plan("row_rings");
+    const auto topology = StaticCompletion(
+        16, 1.0, 5.0, 1.0, 5.0, plan,
+        StaticCompletion::BaseFabric::RowRings);
+    const auto metrics = topology.get_link_metrics();
+
+    EXPECT_EQ(count_links(metrics, LinkClass::BaseMesh), 2 * 16);
+    EXPECT_EQ(count_links(metrics, LinkClass::SwitchUplink), 2 * 16);
+    for (auto endpoint = 0; endpoint < 16; ++endpoint) {
+        const auto device = topology.route(endpoint, endpoint).front();
+        EXPECT_EQ(device->get_connected_device_ids().size(), 4);
+    }
+    EXPECT_EQ(route_ids(topology.route(0, 10, 100)),
+              std::vector<DeviceId>({0, 10}));
     EXPECT_EQ(std::remove(plan.c_str()), 0);
 }
 

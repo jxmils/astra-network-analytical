@@ -181,6 +181,11 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             npus_count, bandwidth, latency, extra_bandwidth,
             2.0 * extra_latency,
             routing_plan_path);
+    case TopologyBuildingBlock::RowRingStaticCompletion2D:
+        return std::make_shared<StaticCompletion>(
+            npus_count, bandwidth, latency, extra_bandwidth,
+            2.0 * extra_latency, routing_plan_path,
+            StaticCompletion::BaseFabric::RowRings);
     case TopologyBuildingBlock::HierarchicalCluster:
         return std::make_shared<HierarchicalCluster>(
             npus_count, bandwidth, latency, extra_bandwidth, extra_latency,

@@ -33,12 +33,13 @@ namespace {
 StaticCompletion::StaticCompletion(
     const int npus_count, const Bandwidth bandwidth, const Latency latency,
     const Bandwidth optical_bandwidth, const Latency optical_path_latency,
-    const std::string& plan_path) noexcept
+    const std::string& plan_path, const BaseFabric base_fabric) noexcept
     : BasicTopology(npus_count, npus_count, bandwidth, latency),
       side(static_cast<int>(std::lround(std::sqrt(npus_count)))),
       planes(2),
       optical_bandwidth(optical_bandwidth),
       optical_path_latency(optical_path_latency),
+      base_fabric(base_fabric),
       adjacency(npus_count) {
     if (side * side != npus_count) {
         reject_completion("static completion requires a square endpoint count");
@@ -52,12 +53,15 @@ StaticCompletion::StaticCompletion(
     dims_count = 2;
     npus_count_per_dim = {side, side};
     bandwidth_per_dim = {bandwidth, bandwidth};
-    basic_topology_type = TopologyBuildingBlock::TorusStaticCompletion2D;
-    build_base_torus();
+    basic_topology_type =
+        base_fabric == BaseFabric::Torus2D
+            ? TopologyBuildingBlock::TorusStaticCompletion2D
+            : TopologyBuildingBlock::RowRingStaticCompletion2D;
+    build_base();
     load_matchings(plan_path);
 }
 
-void StaticCompletion::build_base_torus() noexcept {
+void StaticCompletion::build_base() noexcept {
     const auto add_edge = [this](const DeviceId first, const DeviceId second) {
         const auto ports = connect(first, second, bandwidth, latency, true,
                                    LinkClass::BaseMesh);
@@ -72,10 +76,12 @@ void StaticCompletion::build_base_torus() noexcept {
             } else if (side > 2) {
                 add_edge(source, y * side);
             }
-            if (y + 1 < side) {
-                add_edge(source, (y + 1) * side + x);
-            } else if (side > 2) {
-                add_edge(source, x);
+            if (base_fabric == BaseFabric::Torus2D) {
+                if (y + 1 < side) {
+                    add_edge(source, (y + 1) * side + x);
+                } else if (side > 2) {
+                    add_edge(source, x);
+                }
             }
         }
     }
@@ -84,10 +90,15 @@ void StaticCompletion::build_base_torus() noexcept {
 void StaticCompletion::load_matchings(const std::string& path) noexcept {
     try {
         const auto root = YAML::LoadFile(path);
+        const auto expected_base = base_fabric == BaseFabric::Torus2D
+                                       ? "torus2d"
+                                       : "row_rings";
         if (!root["format"] || root["format"].as<std::string>() !=
                                    "panel-static-completion" ||
             !root["version"] || root["version"].as<int>() != 1 ||
             !root["endpoints"] || root["endpoints"].as<int>() != npus_count ||
+            !root["base_fabric"] ||
+            root["base_fabric"].as<std::string>() != expected_base ||
             !root["matchings"] || !root["matchings"].IsSequence() ||
             static_cast<int>(root["matchings"].size()) != planes) {
             reject_completion("invalid static-completion plan header");
