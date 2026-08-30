@@ -8,6 +8,7 @@ LICENSE file in the root directory of this source tree.
 #include "common/NetworkParser.h"
 #include "common/Type.h"
 #include "congestion_aware/Chunk.h"
+#include "congestion_aware/FileGraph.h"
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/HierarchicalCluster.h"
@@ -151,6 +152,23 @@ std::string write_static_completion_test_plan(
      [8, 13], [9, 14], [10, 15], [11, 12]]
   ]
 })";
+    output.close();
+    return path;
+}
+
+std::string write_file_graph_test_plan(const bool directed = false) {
+    const auto path = "/tmp/analytical-file-graph.yml";
+    auto output = std::ofstream(path);
+    output << "format: panel-physical-graph\n"
+           << "version: 1\n"
+           << "endpoints: 4\n"
+           << "devices: 5\n"
+           << "directed: " << (directed ? "true" : "false") << "\n"
+           << "edges:\n"
+           << "  - {source: 0, destination: 4, class: switch}\n"
+           << "  - {source: 4, destination: 1, class: switch}\n"
+           << "  - {source: 1, destination: 2, class: direct}\n"
+           << "  - {source: 2, destination: 3, class: direct}\n";
     output.close();
     return path;
 }
@@ -917,6 +935,34 @@ TEST_F(TestNetworkAnalyticalCongestionAware,
     EXPECT_EQ(route_ids(optical_route), std::vector<DeviceId>({0, 10}));
     EXPECT_EQ(route_link_classes(optical_route),
               std::vector<LinkClass>(1, LinkClass::SwitchUplink));
+    EXPECT_EQ(std::remove(plan.c_str()), 0);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       FileGraphLoadsSwitchesAndRoutesDeterministically) {
+    const auto plan = write_file_graph_test_plan();
+    const auto topology = FileGraph(4, 200.0, 1'000.0, plan);
+    EXPECT_EQ(topology.get_npus_count(), 4);
+    EXPECT_EQ(topology.get_devices_count(), 5);
+    EXPECT_EQ(route_ids(topology.route(0, 3, 1'024)),
+              std::vector<DeviceId>({0, 4, 1, 2, 3}));
+    EXPECT_EQ(route_link_classes(topology.route(0, 2, 1'024)),
+              std::vector<LinkClass>({LinkClass::SwitchUplink,
+                                      LinkClass::SwitchUplink,
+                                      LinkClass::BaseMesh}));
+    EXPECT_EQ(route_ids(topology.route(3, 0, 1'024)),
+              std::vector<DeviceId>({3, 2, 1, 4, 0}));
+    EXPECT_EQ(std::remove(plan.c_str()), 0);
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
+       FileGraphPreservesDirectedEdges) {
+    const auto plan = write_file_graph_test_plan(true);
+    const auto topology = FileGraph(4, 200.0, 1'000.0, plan);
+    EXPECT_EQ(route_ids(topology.route(0, 3, 1'024)),
+              std::vector<DeviceId>({0, 4, 1, 2, 3}));
+    EXPECT_EQ(count_links(topology.get_link_metrics(), LinkClass::SwitchUplink),
+              2);
     EXPECT_EQ(std::remove(plan.c_str()), 0);
 }
 

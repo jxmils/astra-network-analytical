@@ -70,7 +70,8 @@ enum class TopologyBuildingBlock {
     TorusOcsQtp,
     TorusStaticCompletion2D,
     RowRingStaticCompletion2D,
-    HierarchicalCluster
+    HierarchicalCluster,
+    FileGraph
 };
 
 }  // namespace NetworkAnalytical

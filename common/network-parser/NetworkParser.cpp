@@ -284,6 +284,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::RowRingStaticCompletion2D;
     }
 
+    if (topology_name == "FileGraph") {
+        return TopologyBuildingBlock::FileGraph;
+    }
+
     if (topology_name == "HierarchicalCluster") {
         return TopologyBuildingBlock::HierarchicalCluster;
     }

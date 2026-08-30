@@ -5,6 +5,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "congestion_aware/Helper.h"
 #include "congestion_aware/FullyConnected.h"
+#include "congestion_aware/FileGraph.h"
 #include "congestion_aware/Hybrid2D.h"
 #include "congestion_aware/HierarchicalCluster.h"
 #include "congestion_aware/IdealFlex.h"
@@ -193,6 +194,9 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
         return std::make_shared<HierarchicalCluster>(
             npus_count, bandwidth, latency, extra_bandwidth, extra_latency,
             nic_count);
+    case TopologyBuildingBlock::FileGraph:
+        return std::make_shared<FileGraph>(npus_count, bandwidth, latency,
+                                           routing_plan_path);
     case TopologyBuildingBlock::FullyConnected:
         return std::make_shared<FullyConnected>(npus_count, bandwidth, latency);
     default:
