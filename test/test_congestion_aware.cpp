@@ -1112,6 +1112,25 @@ TEST_F(TestNetworkAnalyticalCongestionAware, ThreeDimensionalFabricsHaveExactPor
     }
 }
 
+TEST_F(TestNetworkAnalyticalCongestionAware, ExplicitRouteUsesRequestStream) {
+    const auto path = std::string("/tmp/astra-explicit-route-test.tsv");
+    {
+        auto output = std::ofstream(path);
+        output << "123\t0\t5\t0,4,5\n";
+    }
+    ASSERT_EQ(setenv("ASTRA_EXPLICIT_ROUTE_FILE", path.c_str(), 1), 0);
+    const auto topology = Mesh3D(
+        std::array<int, 3>{4, 4, 4}, 200.0, 1'000.0, false);
+    ASSERT_EQ(unsetenv("ASTRA_EXPLICIT_ROUTE_FILE"), 0);
+    std::remove(path.c_str());
+
+    const Topology& routed = topology;
+    EXPECT_EQ(route_ids(routed.route(0, 5, 1'024, 123)),
+              std::vector<DeviceId>({0, 4, 5}));
+    EXPECT_EQ(route_ids(routed.route(0, 5, 1'024, 124)),
+              std::vector<DeviceId>({0, 1, 5}));
+}
+
 TEST_F(TestNetworkAnalyticalCongestionAware,
        RectangularThreeDimensionalTorusHasSixDistinctPortsAndMinimalRoutes) {
     constexpr auto extents = std::array<int, 3>{4, 8, 8};

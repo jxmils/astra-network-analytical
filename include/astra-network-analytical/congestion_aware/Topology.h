@@ -11,6 +11,8 @@ LICENSE file in the root directory of this source tree.
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -136,6 +138,10 @@ class Topology {
 
     std::map<std::pair<RouteClass, int>, RouteMetrics> route_metrics;
 
+    /// Optional exact paths keyed by (stream, source, destination).
+    std::map<std::tuple<int, DeviceId, DeviceId>, std::vector<DeviceId>>
+        explicit_routes;
+
     /// Shared simulator queue used by links and topology-level fabrics.
     static std::shared_ptr<EventQueue> event_queue;
 
@@ -143,6 +149,9 @@ class Topology {
      * Instantiate Device objects in the topology.
      */
     void instantiate_devices() noexcept;
+
+    /** Load ASTRA_EXPLICIT_ROUTE_FILE when one is configured. */
+    void load_explicit_routes() noexcept;
 
     void record_route(const Route& route, ChunkSize chunk_size) noexcept;
     void record_route_metrics(RouteClass route_class, int logical_hops,

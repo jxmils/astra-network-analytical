@@ -6,8 +6,13 @@ LICENSE file in the root directory of this source tree.
 #include "congestion_aware/Topology.h"
 #include "congestion_aware/Link.h"
 #include "common/NetworkFunction.h"
+#include <algorithm>
 #include <cassert>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <ostream>
+#include <sstream>
 
 using namespace NetworkAnalyticalCongestionAware;
 
@@ -23,6 +28,7 @@ void Topology::set_event_queue(std::shared_ptr<EventQueue> event_queue) noexcept
 
 Topology::Topology() noexcept : npus_count(-1), devices_count(-1), dims_count(-1) {
     npus_count_per_dim = {};
+    load_explicit_routes();
 }
 
 Route Topology::route(const DeviceId src, const DeviceId dest,
@@ -33,8 +39,90 @@ Route Topology::route(const DeviceId src, const DeviceId dest,
 
 Route Topology::route(const DeviceId src, const DeviceId dest,
                       const ChunkSize chunk_size, const int stream) const noexcept {
-    static_cast<void>(stream);
+    const auto found = explicit_routes.find(std::make_tuple(stream, src, dest));
+    if (found != explicit_routes.end()) {
+        const auto& ids = found->second;
+        if (ids.size() < 2 || ids.front() != src || ids.back() != dest) {
+            std::cerr << "[Error] invalid explicit route endpoints for stream "
+                      << stream << std::endl;
+            std::abort();
+        }
+        auto path = Route();
+        for (const auto id : ids) {
+            if (id < 0 || id >= devices_count) {
+                std::cerr << "[Error] explicit route device outside topology: "
+                          << id << std::endl;
+                std::abort();
+            }
+            path.emplace_back(devices[id]);
+        }
+        auto current = path.begin();
+        auto next = std::next(current);
+        while (next != path.end()) {
+            const auto peers = current->device->get_connected_device_ids();
+            if (std::find(peers.begin(), peers.end(), next->device->get_id()) ==
+                peers.end()) {
+                std::cerr << "[Error] explicit route uses missing directed link "
+                          << current->device->get_id() << " -> "
+                          << next->device->get_id() << " for stream " << stream
+                          << std::endl;
+                std::abort();
+            }
+            ++current;
+            ++next;
+        }
+        return path;
+    }
     return route(src, dest, chunk_size);
+}
+
+void Topology::load_explicit_routes() noexcept {
+    const auto* path = std::getenv("ASTRA_EXPLICIT_ROUTE_FILE");
+    if (path == nullptr || *path == '\0') {
+        return;
+    }
+    std::ifstream input(path);
+    if (!input) {
+        std::cerr << "[Error] cannot open explicit route file " << path << std::endl;
+        std::abort();
+    }
+    std::string line;
+    auto line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        std::istringstream row(line);
+        int stream = -1;
+        DeviceId src = -1;
+        DeviceId dest = -1;
+        std::string encoded_path;
+        if (!(row >> stream >> src >> dest >> encoded_path)) {
+            std::cerr << "[Error] malformed explicit route at " << path << ':'
+                      << line_number << std::endl;
+            std::abort();
+        }
+        std::vector<DeviceId> ids;
+        std::istringstream values(encoded_path);
+        std::string value;
+        while (std::getline(values, value, ',')) {
+            try {
+                ids.push_back(std::stoi(value));
+            } catch (...) {
+                std::cerr << "[Error] malformed explicit route device at " << path
+                          << ':' << line_number << std::endl;
+                std::abort();
+            }
+        }
+        const auto key = std::make_tuple(stream, src, dest);
+        if (ids.size() < 2 || ids.front() != src || ids.back() != dest ||
+            !explicit_routes.emplace(key, std::move(ids)).second) {
+            std::cerr << "[Error] invalid or duplicate explicit route at " << path
+                      << ':' << line_number << std::endl;
+            std::abort();
+        }
+    }
 }
 
 int Topology::get_devices_count() const noexcept {
