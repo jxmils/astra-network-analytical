@@ -17,7 +17,8 @@ class MultiPlaneSwitch final : public BasicTopology {
   public:
     static constexpr int Planes = 6;
 
-    MultiPlaneSwitch(int npus_count, Bandwidth bandwidth, Latency latency) noexcept;
+    MultiPlaneSwitch(int npus_count, Bandwidth bandwidth, Latency latency,
+                     bool topology_aware = false) noexcept;
 
     [[nodiscard]] Route route(DeviceId src, DeviceId dest) const noexcept override;
     [[nodiscard]] Route route(DeviceId src, DeviceId dest,

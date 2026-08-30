@@ -232,6 +232,10 @@ TopologyBuildingBlock NetworkParser::parse_topology_name(const std::string& topo
         return TopologyBuildingBlock::MultiSwitch6Adaptive;
     }
 
+    if (topology_name == "MultiSwitch6Adaptive3D") {
+        return TopologyBuildingBlock::MultiSwitch6Adaptive3D;
+    }
+
     if (topology_name == "OcsSwitch6") {
         return TopologyBuildingBlock::OcsSwitch6;
     }

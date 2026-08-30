@@ -1262,6 +1262,19 @@ TEST_F(TestNetworkAnalyticalCongestionAware, SixPortBaselinesUseExactEndpointPor
 }
 
 TEST_F(TestNetworkAnalyticalCongestionAware,
+       TopologyAwareFullSwitchChangesOnlyLogicalDimensions) {
+    const auto ordinary = MultiPlaneSwitch(64, 200.0, 1'000.0);
+    const auto grouped = MultiPlaneSwitch(64, 200.0, 1'000.0, true);
+    EXPECT_EQ(ordinary.get_npus_count_per_dim(), std::vector<int>({64}));
+    EXPECT_EQ(grouped.get_npus_count_per_dim(),
+              std::vector<int>({4, 4, 4}));
+    EXPECT_EQ(ordinary.get_link_metrics().size(),
+              grouped.get_link_metrics().size());
+    EXPECT_EQ(route_ids(ordinary.route(0, 63)),
+              route_ids(grouped.route(0, 63)));
+}
+
+TEST_F(TestNetworkAnalyticalCongestionAware,
        HierarchicalClusterHasExactResourcesAndLogicalDimensions) {
     constexpr auto npus = 64;
     const auto topology = HierarchicalCluster(

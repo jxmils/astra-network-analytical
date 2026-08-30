@@ -7,15 +7,33 @@ LICENSE file in the root directory of this source tree.
 #include "common/NetworkFunction.h"
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
 
 using namespace NetworkAnalytical;
 using namespace NetworkAnalyticalCongestionAware;
 
 MultiPlaneSwitch::MultiPlaneSwitch(const int npus_count,
                                    const Bandwidth bandwidth,
-                                   const Latency latency) noexcept
+                                   const Latency latency,
+                                   const bool topology_aware) noexcept
     : BasicTopology(npus_count, npus_count + Planes, bandwidth, latency) {
-    basic_topology_type = TopologyBuildingBlock::MultiSwitch6Adaptive;
+    basic_topology_type = topology_aware
+                              ? TopologyBuildingBlock::MultiSwitch6Adaptive3D
+                              : TopologyBuildingBlock::MultiSwitch6Adaptive;
+    if (topology_aware) {
+        const auto extent = static_cast<int>(std::lround(std::cbrt(
+            static_cast<double>(npus_count))));
+        if (extent * extent * extent != npus_count) {
+            std::cerr << "[Error] MultiSwitch6Adaptive3D requires a cubic "
+                         "endpoint count" << std::endl;
+            std::abort();
+        }
+        dims_count = 3;
+        npus_count_per_dim = {extent, extent, extent};
+        bandwidth_per_dim = {bandwidth, bandwidth, bandwidth};
+    }
     switch_ports.assign(Planes, std::vector<SwitchPorts>(npus_count));
     for (auto plane = 0; plane < Planes; ++plane) {
         const auto switch_id = npus_count + plane;

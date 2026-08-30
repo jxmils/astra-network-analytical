@@ -149,6 +149,9 @@ std::shared_ptr<Topology> NetworkAnalyticalCongestionAware::construct_topology(
             direct_preference_factor, "", true, Hybrid2D::LogicalShape::Grid);
     case TopologyBuildingBlock::MultiSwitch6Adaptive:
         return std::make_shared<MultiPlaneSwitch>(npus_count, bandwidth, latency);
+    case TopologyBuildingBlock::MultiSwitch6Adaptive3D:
+        return std::make_shared<MultiPlaneSwitch>(
+            npus_count, bandwidth, latency, true);
     case TopologyBuildingBlock::OcsSwitch6:
         return std::make_shared<OcsSwitch>(npus_count, bandwidth, latency,
                                            ocs_plan_path);
